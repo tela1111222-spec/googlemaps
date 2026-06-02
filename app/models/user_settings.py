@@ -2,11 +2,11 @@ import sqlite3
 from app.models.user_route import _get_connection
 
 class UserSettings:
-    def __init__(self, id=None, warning_threshold=0, enable_voice_alert=1, approaching_alert_ratio=0.9):
+    def __init__(self, id=None, warning_threshold=50, enable_voice_alert=1, enable_auto_brightness=1):
         self.id = id
         self.warning_threshold = warning_threshold
         self.enable_voice_alert = enable_voice_alert
-        self.approaching_alert_ratio = approaching_alert_ratio
+        self.enable_auto_brightness = enable_auto_brightness
 
     @classmethod
     def get_settings(cls):
@@ -27,22 +27,22 @@ class UserSettings:
             else:
                 # 建立預設設定
                 cursor.execute('''
-                    INSERT INTO user_settings (warning_threshold, enable_voice_alert, approaching_alert_ratio)
+                    INSERT INTO user_settings (warning_threshold, enable_voice_alert, enable_auto_brightness)
                     VALUES (?, ?, ?)
-                ''', (0, 1, 0.9))
+                ''', (50, 1, 1))
                 conn.commit()
                 new_id = cursor.lastrowid
-                return cls(id=new_id, warning_threshold=0, enable_voice_alert=1, approaching_alert_ratio=0.9)
+                return cls(id=new_id, warning_threshold=50, enable_voice_alert=1, enable_auto_brightness=1)
         except sqlite3.Error as e:
             print(f"Error in UserSettings.get_settings: {e}")
             # 回傳預設值，避免程式當掉
-            return cls(id=1, warning_threshold=0, enable_voice_alert=1, approaching_alert_ratio=0.9)
+            return cls(id=1, warning_threshold=50, enable_voice_alert=1, enable_auto_brightness=1)
         finally:
             if conn:
                 conn.close()
 
     @classmethod
-    def update_settings(cls, warning_threshold: int, enable_voice_alert: int, approaching_alert_ratio: float):
+    def update_settings(cls, warning_threshold: int, enable_voice_alert: int, enable_auto_brightness: int):
         """
         更新全域唯一的使用者設定。
         
@@ -60,14 +60,14 @@ class UserSettings:
                 settings_id = row['id']
                 cursor.execute('''
                     UPDATE user_settings
-                    SET warning_threshold = ?, enable_voice_alert = ?, approaching_alert_ratio = ?
+                    SET warning_threshold = ?, enable_voice_alert = ?, enable_auto_brightness = ?
                     WHERE id = ?
-                ''', (warning_threshold, enable_voice_alert, approaching_alert_ratio, settings_id))
+                ''', (warning_threshold, enable_voice_alert, enable_auto_brightness, settings_id))
             else:
                 cursor.execute('''
-                    INSERT INTO user_settings (warning_threshold, enable_voice_alert, approaching_alert_ratio)
+                    INSERT INTO user_settings (warning_threshold, enable_voice_alert, enable_auto_brightness)
                     VALUES (?, ?, ?)
-                ''', (warning_threshold, enable_voice_alert, approaching_alert_ratio))
+                ''', (warning_threshold, enable_voice_alert, enable_auto_brightness))
             conn.commit()
             return cls.get_settings()
         except sqlite3.Error as e:
@@ -82,19 +82,19 @@ class UserSettings:
     # --- 以下為符合 db-design skill 之標準 CRUD 方法 ---
 
     @classmethod
-    def create(cls, warning_threshold=0, enable_voice_alert=1, approaching_alert_ratio=0.9):
+    def create(cls, warning_threshold=50, enable_voice_alert=1, enable_auto_brightness=1):
         """建立一筆新設定"""
         conn = None
         try:
             conn = _get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO user_settings (warning_threshold, enable_voice_alert, approaching_alert_ratio)
+                INSERT INTO user_settings (warning_threshold, enable_voice_alert, enable_auto_brightness)
                 VALUES (?, ?, ?)
-            ''', (warning_threshold, enable_voice_alert, approaching_alert_ratio))
+            ''', (warning_threshold, enable_voice_alert, enable_auto_brightness))
             conn.commit()
             new_id = cursor.lastrowid
-            return cls(id=new_id, warning_threshold=warning_threshold, enable_voice_alert=enable_voice_alert, approaching_alert_ratio=approaching_alert_ratio)
+            return cls(id=new_id, warning_threshold=warning_threshold, enable_voice_alert=enable_voice_alert, enable_auto_brightness=enable_auto_brightness)
         except sqlite3.Error as e:
             print(f"Error in UserSettings.create: {e}")
             if conn:
@@ -141,7 +141,7 @@ class UserSettings:
                 conn.close()
 
     @classmethod
-    def update(cls, settings_id, warning_threshold=None, enable_voice_alert=None, approaching_alert_ratio=None):
+    def update(cls, settings_id, warning_threshold=None, enable_voice_alert=None, enable_auto_brightness=None):
         """依據 ID 更新特定欄位"""
         conn = None
         try:
@@ -156,9 +156,9 @@ class UserSettings:
             if enable_voice_alert is not None:
                 updates.append("enable_voice_alert = ?")
                 params.append(enable_voice_alert)
-            if approaching_alert_ratio is not None:
-                updates.append("approaching_alert_ratio = ?")
-                params.append(approaching_alert_ratio)
+            if enable_auto_brightness is not None:
+                updates.append("enable_auto_brightness = ?")
+                params.append(enable_auto_brightness)
                 
             if not updates:
                 return cls.get_by_id(settings_id)

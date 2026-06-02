@@ -1,28 +1,23 @@
 -- database/schema.sql
 
--- 1. 使用者設定表
+-- 1. 使用者偏好設定表
 CREATE TABLE IF NOT EXISTS user_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    warning_threshold INTEGER NOT NULL DEFAULT 0,
+    warning_threshold INTEGER NOT NULL DEFAULT 50,
     enable_voice_alert INTEGER NOT NULL DEFAULT 1,
-    approaching_alert_ratio REAL NOT NULL DEFAULT 0.9
+    enable_auto_brightness INTEGER NOT NULL DEFAULT 1
 );
 
--- 2. 道路速限表
-CREATE TABLE IF NOT EXISTS road_limits (
+-- 2. 路口待轉規則表
+CREATE TABLE IF NOT EXISTS intersection_limits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    road_name TEXT NOT NULL,
-    speed_limit INTEGER NOT NULL,
-    start_lat REAL NOT NULL,
-    start_lng REAL NOT NULL,
-    end_lat REAL NOT NULL,
-    end_lng REAL NOT NULL,
-    upcoming_limit INTEGER,
-    upcoming_lat REAL,
-    upcoming_lng REAL
+    intersection_name TEXT NOT NULL,
+    need_two_stage_turn INTEGER NOT NULL DEFAULT 1,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL
 );
 
--- 3. 歷史行程紀錄表
+-- 3. 歷史行程紀錄表 (保留相容性)
 CREATE TABLE IF NOT EXISTS route_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     destination TEXT NOT NULL,
@@ -31,13 +26,16 @@ CREATE TABLE IF NOT EXISTS route_history (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 插入模擬道路數據（若不存在）
-INSERT OR IGNORE INTO road_limits (id, road_name, speed_limit, start_lat, start_lng, end_lat, end_lng, upcoming_limit, upcoming_lat, upcoming_lng)
-VALUES (1, '忠孝東路三段', 50, 25.042, 121.535, 25.042, 121.545, 40, 25.042, 121.543);
+-- 插入模擬待轉路口數據（若不存在）
+INSERT OR IGNORE INTO intersection_limits (id, intersection_name, need_two_stage_turn, latitude, longitude)
+VALUES (1, '忠孝新生路口 (忠孝新生捷運站旁)', 1, 25.042, 121.535);
 
-INSERT OR IGNORE INTO road_limits (id, road_name, speed_limit, start_lat, start_lng, end_lat, end_lng, upcoming_limit, upcoming_lat, upcoming_lng)
-VALUES (2, '北宜公路30K', 40, 24.985, 121.580, 24.970, 121.590, NULL, NULL, NULL);
+INSERT OR IGNORE INTO intersection_limits (id, intersection_name, need_two_stage_turn, latitude, longitude)
+VALUES (2, '忠孝復興路口 (SOGO百貨旁)', 1, 25.042, 121.543);
+
+INSERT OR IGNORE INTO intersection_limits (id, intersection_name, need_two_stage_turn, latitude, longitude)
+VALUES (3, '北宜公路待轉路口', 1, 24.978, 121.585);
 
 -- 插入預設設定資料（若不存在）
-INSERT OR IGNORE INTO user_settings (id, warning_threshold, enable_voice_alert, approaching_alert_ratio)
-VALUES (1, 0, 1, 0.9);
+INSERT OR IGNORE INTO user_settings (id, warning_threshold, enable_voice_alert, enable_auto_brightness)
+VALUES (1, 50, 1, 1);
