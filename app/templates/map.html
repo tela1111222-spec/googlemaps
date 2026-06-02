@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <div class="row g-4">
+        <!-- 左側控制面板 -->
+        <div class="col-lg-4 col-md-5">
+            <div class="glass-card h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <h3 class="mb-4"><i class="fa-solid fa-route me-2 text-info"></i>個人化路線規劃</h3>
+                    
+                    <!-- 高對比切換 -->
+                    <div class="form-check form-switch mb-4">
+                        <input class="form-check-input" type="checkbox" id="highContrastToggle">
+                        <label class="form-check-label fw-bold text-warning" for="highContrastToggle">
+                            <i class="fa-solid fa-circle-half-stroke me-1"></i> 高對比導航模式 (烈日/老人偏好)
+                        </label>
+                    </div>
+
+                    <!-- 計算路線表單 -->
+                    <form id="calcForm" class="mb-4">
+                        <div class="mb-3">
+                            <label for="destinationInput" class="form-label fw-bold">輸入目的地</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-dark border-secondary text-light"><i class="fa-solid fa-location-dot"></i></span>
+                                <input type="text" class="form-control custom-input" id="destinationInput" placeholder="例如：台北 101, 淡水漁人碼頭" required>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label fw-bold d-block">個人化避開條件 (機車安全考量)</label>
+                            <div class="form-check form-check-inline me-3">
+                                <input class="form-check-input" type="checkbox" id="avoidTraffic" value="擁擠路段">
+                                <label class="form-check-label" for="avoidTraffic">避開擁擠路段</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="avoidDanger" value="危險路口">
+                                <label class="form-check-label" for="avoidDanger">避開危險路口</label>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-premium w-100" id="btnCalculate">
+                            <i class="fa-solid fa-compass me-2"></i> 計算個人化路線
+                        </button>
+                    </form>
+
+                    <!-- 導航語音狀態面板 (預設隱藏) -->
+                    <div id="statusPanel" class="status-panel d-none">
+                        <i class="fa-solid fa-volume-high fa-beat me-2"></i>
+                        <span id="statusText">語音助理已就緒...</span>
+                    </div>
+                </div>
+
+                <!-- 導航控制與儲存按鈕 -->
+                <div class="mt-4">
+                    <button id="btnStartNav" class="btn btn-success w-100 py-3 mb-2 d-none fw-bold" style="border-radius: 10px;">
+                        <i class="fa-solid fa-play me-2"></i> 開始導航 (語音提示)
+                    </button>
+
+                    <!-- 儲存行程隱藏表單 -->
+                    <form id="saveHistoryForm" action="{{ url_for('history.save_history') }}" method="POST" class="d-none">
+                        <input type="hidden" name="destination" id="saveDestination">
+                        <input type="hidden" name="avoid_conditions" id="saveAvoidConditions">
+                        <input type="hidden" name="route_data" id="saveRouteData">
+                        <button type="submit" id="btnSaveHistory" class="btn btn-outline-info w-100 py-3 fw-bold" style="border-radius: 10px;">
+                            <i class="fa-solid fa-floppy-disk me-2"></i> 儲存此行程紀錄
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側地圖視窗 -->
+        <div class="col-lg-8 col-md-7">
+            <div id="map"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 初始化地圖 (預設中心為台北車站)
+    const map = L.map('map').setView([25.0479, 121.5173], 14);
+
+    // 一般地圖圖層 (CartoDB Dark Matter)
+    const darkTile = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
+    }).addTo(map);
+
+    // 高對比地圖圖層 (OpenStreetMap)
+    const contrastTile = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    });
+
+    let currentRouteLine = null;
+    let startMarker = null;
+    let endMarker = null;
+    let routeCoords = null;
+    let routeDesc = "";
+
+    // 目的地與條件全域變數
+    let targetDestination = "";
+    let appliedAvoidConditions = "";
+    let rawRouteDataJson = "";
+
+    // 高對比模式切換
+    const hcsToggle = document.getElementById('highContrastToggle');
+    hcsToggle.addEventListener('change', function() {
+        if (this.checked) {
+            document.body.classList.add('high-contrast');
+            map.removeLayer(darkTile);
+            contrastTile.addTo(map);
+        } else {
+            document.body.classList.remove('high-contrast');
+            map.removeLayer(contrastTile);
+            darkTile.addTo(map);
+        }
+        map.invalidateSize();
+    });
+
+    // 語音播報輔助功能 (Web Speech API)
+    function speak(text) {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel(); // 停止目前播放
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-TW';
+            utterance.rate = 1.0;
+            window.speechSynthesis.speak(utterance);
+
+            // 更新語音面板狀態
+            const statusPanel = document.getElementById('statusPanel');
+            const statusText = document.getElementById('statusText');
+            statusPanel.classList.remove('d-none');
+            statusText.innerText = text;
+        } else {
+            console.log("不支援 Web Speech API");
+        }
+    }
+
+    // 表單提交 -> 計算路線
+    const calcForm = document.getElementById('calcForm');
+    calcForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const destination = document.getElementById('destinationInput').value.trim();
+        const avoids = [];
+        if (document.getElementById('avoidTraffic').checked) avoids.push('擁擠路段');
+        if (document.getElementById('avoidDanger').checked) avoids.push('危險路口');
+        const avoid_conditions = avoids.join(',');
+
+        // 鎖定計算按鈕
+        const btnCalculate = document.getElementById('btnCalculate');
+        btnCalculate.disabled = true;
+        btnCalculate.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> 計算中...';
+
+        // 呼叫後端 API
+        fetch('/api/routes/calculate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ destination, avoid_conditions })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error('計算失敗');
+            return res.json();
+        })
+        .then(data => {
+            btnCalculate.disabled = false;
+            btnCalculate.innerHTML = '<i class="fa-solid fa-compass me-2"></i> 計算個人化路線';
+
+            if (data.status === 'success') {
+                targetDestination = data.destination;
+                appliedAvoidConditions = data.avoid_conditions;
+                rawRouteDataJson = data.route_data;
+
+                const parsedRoute = JSON.parse(data.route_data);
+                routeCoords = parsedRoute.coordinates;
+                routeDesc = parsedRoute.description;
+
+                // 移除舊有地圖繪製線條與標註
+                if (currentRouteLine) map.removeLayer(currentRouteLine);
+                if (startMarker) map.removeLayer(startMarker);
+                if (endMarker) map.removeLayer(endMarker);
+
+                // Leaflet 繪製路徑
+                const latlngs = routeCoords.map(coord => [coord[1], coord[0]]);
+                currentRouteLine = L.polyline(latlngs, {
+                    color: '#00ff66',
+                    weight: 6,
+                    opacity: 0.9,
+                    dashArray: '10, 5'
+                }).addTo(map);
+
+                // 聚焦地圖邊界
+                map.fitBounds(currentRouteLine.getBounds(), { padding: [50, 50] });
+
+                // 建立 Marker
+                startMarker = L.marker(latlngs[0]).addTo(map).bindPopup("起點: 台北車站").openPopup();
+                endMarker = L.marker(latlngs[latlngs.length - 1]).addTo(map).bindPopup(`目的地: ${targetDestination}`);
+
+                // 解鎖導航按鈕並隱藏歷史表單
+                document.getElementById('btnStartNav').classList.remove('d-none');
+                document.getElementById('saveHistoryForm').classList.add('d-none');
+
+                // 語音播報提醒
+                speak(`路線規劃完成。${routeDesc}，請點擊開始導航。`);
+            }
+        })
+        .catch(err => {
+            btnCalculate.disabled = false;
+            btnCalculate.innerHTML = '<i class="fa-solid fa-compass me-2"></i> 計算個人化路線';
+            alert('規劃路線失敗，請重新嘗試。');
+        });
+    });
+
+    // 開始導航
+    const btnStartNav = document.getElementById('btnStartNav');
+    btnStartNav.addEventListener('click', function() {
+        speak(`語音導航已啟動。前方目的地為：${targetDestination}。為您避開${appliedAvoidConditions || '無'}。請專注騎乘。`);
+        
+        btnStartNav.disabled = true;
+        btnStartNav.innerHTML = '<i class="fa-solid fa-location-arrow fa-spin me-2"></i> 導航中...';
+
+        // 模擬行車 5 秒後抵達
+        setTimeout(() => {
+            speak(`您已抵達目的地：${targetDestination}。行程結束。`);
+            btnStartNav.disabled = false;
+            btnStartNav.classList.add('d-none');
+            btnStartNav.innerHTML = '<i class="fa-solid fa-play me-2"></i> 開始導航 (語音提示)';
+
+            // 填寫儲存歷史紀錄表單並解鎖
+            document.getElementById('saveDestination').value = targetDestination;
+            document.getElementById('saveAvoidConditions').value = appliedAvoidConditions;
+            document.getElementById('saveRouteData').value = rawRouteDataJson;
+
+            document.getElementById('saveHistoryForm').classList.remove('d-none');
+        }, 5000);
+    });
+</script>
+{% endblock %}
