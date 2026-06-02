@@ -1,22 +1,24 @@
 # API 路由與頁面設計文件 (ROUTES.md)
 
-本文件規劃「個人化路徑系統」的 Flask 路由（Routes），包含每個頁面的 URL 路徑、HTTP 方法、輸入/輸出、處理邏輯與對應的 Jinja2 模板。
+本文件規劃「機車安全速限警示與預告系統」的 Flask 路由（Routes），包含每個頁面的 URL 路徑、HTTP 方法、輸入/輸出、處理邏輯與對應的 Jinja2 模板。
+
+---
 
 ## 1. 路由總覽表格
 
 | 功能 | HTTP 方法 | URL 路徑 | 對應模板 | 說明 |
 |---|---|---|---|---|
-| 首頁 (主地圖頁面) | GET | `/` | `app/templates/map.html` | 顯示主地圖與搜尋介面，提供偏好條件設定與高對比模式切換入口。 |
-| 計算個人化路線 | POST | `/api/routes/calculate` | — | 接收目的地與避開條件，回傳計算後路徑座標（JSON 格式）。 |
-| 查看歷史行程列表 | GET | `/history` | `app/templates/history.html` | 讀取所有行程紀錄，並由 Model 自動解密後顯示。 |
-| 建立行程紀錄 | POST | `/history` | — | 接收導航完畢的行程資料，將路線資料加密後存入 DB，重導向至列表。 |
-| 刪除行程紀錄 | POST | `/history/<int:history_id>/delete` | — | 刪除指定 ID 的歷史行程，刪除後重導向至列表。 |
+| 導航主頁 (地圖與儀表板) | GET | `/` | `app/templates/map.html` | 顯示 Leaflet 地圖、車速儀表板與超速變紅警示遮罩，啟動 GPS 監測。 |
+| 偏好設定頁面 | GET | `/settings` | `app/templates/settings.html` | 顯示警告聲開關、超速警示閾值及接近比例設定表單。 |
+| 更新偏好設定 | POST | `/settings` | — | 接收並更新使用者警示設定，更新後重導向回設定頁面。 |
+| 查詢當前路段速限 | POST | `/api/speed-limit` | — | 接收 GPS 座標，查詢並回傳當前路段的法定速限與道路名稱（JSON 格式）。 |
+| 前方速限預告查詢 | POST | `/api/route/preview` | — | 接收當前 GPS 座標，查詢前方 300 公尺是否有速限降低變化（JSON 格式）。 |
 
 ---
 
 ## 2. 每個路由的詳細說明
 
-### 2.1 首頁 (主地圖頁面)
+### 2.1 導航主頁 (地圖與儀表板)
 * **URL 路徑**：`/`
 * **HTTP 方法**：`GET`
 * **對應模板**：`app/templates/map.html` (繼承 `base.html`)
@@ -28,109 +30,136 @@
 * **錯誤處理**：
   * 若模板不存在，Flask 將拋出 500 錯誤。
 
-### 2.2 計算個人化路線
-* **URL 路徑**：`/api/routes/calculate`
+---
+
+### 2.2 偏好設定頁面
+* **URL 路徑**：`/settings`
+* **HTTP 方法**：`GET`
+* **對應模板**：`app/templates/settings.html` (繼承 `base.html`)
+* **輸入**：無
+* **處理邏輯**：
+  * 呼叫 `UserSettings.get_settings()` 獲取當前使用者的警示設定。
+  * 將設定傳遞至 `settings.html` 渲染。
+* **輸出**：
+  * 渲染後的 HTML 設定頁面。
+* **錯誤處理**：
+  * 若資料庫異常，使用 Default UserSettings 執行渲染，並用 Flash 提示使用者。
+
+---
+
+### 2.3 更新偏好設定
+* **URL 路徑**：`/settings`
+* **HTTP 方法**：`POST`
+* **對應模板**：無 (重導向)
+* **輸入**：
+  * **表單欄位 (form-data)**:
+    * `warning_threshold`: 超速警告門檻（整數，單位 km/h，必填）
+    * `enable_voice_alert`: 是否播放警告聲（整數 0 或 1，必填）
+    * `approaching_alert_ratio`: 接近速限警告比率（浮點數，如 0.9，必填）
+* **處理邏輯**：
+  * 驗證表單欄位資料。
+  * 呼叫 `UserSettings.update_settings(warning_threshold, enable_voice_alert, approaching_alert_ratio)` 更新 SQLite 資料庫。
+  * 成功後發送 Flash 成功訊息，並重導向回 `/settings`。
+* **輸出**：
+  * 302 重導向至 `/settings`。
+* **錯誤處理**：
+  * 若欄位格式不符或遺失，重導向回 `/settings` 並顯示 Flash 錯誤提示。
+
+---
+
+### 2.4 查詢當前路段速限
+* **URL 路徑**：`/api/speed-limit`
 * **HTTP 方法**：`POST`
 * **對應模板**：無 (純 API 回傳 JSON)
 * **輸入**：
   * **JSON Body**:
     ```json
     {
-      "destination": "台北 101",
-      "avoid_conditions": "擁擠路段,危險路口"
+      "latitude": 25.0421,
+      "longitude": 121.5400
     }
     ```
 * **處理邏輯**：
-  * 接收 JSON 請求，驗證 `destination`。
-  * 根據 `avoid_conditions` 計算符合偏好的路線（MVP 階段回傳包含座標序列與模擬路徑的 JSON）。
-  * 必須優化演算法以保證在 3 秒內完成計算。
+  * 接收 JSON 請求，驗證 `latitude` 與 `longitude` 是否存在。
+  * 呼叫 `RoadSpeedLimit.find_nearest(latitude, longitude)` 查詢最近的道路段與距離。
+  * 若距離在合理範圍內（例如 50 公尺內），則視為騎士行駛在該路段，獲取其法定速限；若太遠則回傳預設速限。
 * **輸出**：
   * **JSON Response (200 OK)**:
     ```json
     {
       "status": "success",
-      "destination": "台北 101",
-      "avoid_conditions": "擁擠路段,危險路口",
-      "route_data": "[[121.5645, 25.0338], [121.5650, 25.0340]]"
+      "road_name": "忠孝東路三段",
+      "speed_limit": 50,
+      "distance": 11.12
     }
     ```
 * **錯誤處理**：
-  * 若缺少 `destination`，回傳 400 Bad Request：
+  * 若缺少經緯度，回傳 400 Bad Request：
     ```json
     {
       "status": "error",
-      "message": "Missing destination parameter"
+      "message": "Missing latitude or longitude parameter"
     }
     ```
 
-### 2.3 查看歷史行程列表
-* **URL 路徑**：`/history`
-* **HTTP 方法**：`GET`
-* **對應模板**：`app/templates/history.html` (繼承 `base.html`)
-* **輸入**：無
-* **處理邏輯**：
-  * 呼叫 `RouteHistory.get_all()` 查詢所有歷史紀錄。
-  * `RouteHistory` Model 會自動解密資料庫中 `encrypted_route_data` 欄位的資料，在屬性 `route_data` 提供明文。
-* **輸出**：
-  * 渲染 `history.html`，並將解密後的歷史紀錄列表傳給模板。
-* **錯誤處理**：
-  * 若資料庫連線失敗，回傳 500 錯誤頁面。
+---
 
-### 2.4 建立行程紀錄
-* **URL 路徑**：`/history`
+### 2.5 前方速限預告查詢
+* **URL 路徑**：`/api/route/preview`
 * **HTTP 方法**：`POST`
-* **對應模板**：無 (重導向)
+* **對應模板**：無 (純 API 回傳 JSON)
 * **輸入**：
-  * **表單欄位 (form-data)**:
-    * `destination`: 目的地名稱或地址 (必填)
-    * `avoid_conditions`: 避開的條件（如「擁擠路段」, 選填）
-    * `route_data`: 路線座標點明文字串 (必填)
+  * **JSON Body**:
+    ```json
+    {
+      "latitude": 25.0420,
+      "longitude": 121.5410
+    }
+    ```
 * **處理邏輯**：
-  * 驗證必填欄位。
-  * 呼叫 `RouteHistory.create(destination, avoid_conditions, route_data)`，該方法將對 `route_data` 進行加密後存入 SQLite 資料庫。
-  * 儲存成功後，使用 `redirect(url_for('history.list_history'))` 重導向。
+  * 接收當前 GPS 座標。
+  * 呼叫 `RoadSpeedLimit.find_nearest(latitude, longitude)` 找到當前行駛路段。
+  * 檢查該路段是否有前方速限變化（`upcoming_limit` 與 `upcoming_lat`/`upcoming_lng`）。
+  * 若有，計算當前位置到預告點的距離。如果距離在 300 公尺內且速限低於當前速限，則回傳預告警示資訊。
 * **輸出**：
-  * 302 重導向至 `/history`。
+  * **JSON Response (200 OK)**:
+    ```json
+    {
+      "status": "success",
+      "trigger_preview": true,
+      "upcoming_limit": 40,
+      "distance_to_change": 201.48
+    }
+    ```
 * **錯誤處理**：
-  * 若缺少必要參數，重導向回首頁，並利用 Flask flash 顯示錯誤。
-
-### 2.5 刪除行程紀錄
-* **URL 路徑**：`/history/<int:history_id>/delete`
-* **HTTP 方法**：`POST`
-* **對應模板**：無 (重導向)
-* **輸入**：
-  * **URL 參數**: `history_id` (整數，必填)
-* **處理邏輯**：
-  * 呼叫 `RouteHistory.delete(history_id)` 從 SQLite 資料庫移除該筆資料。
-  * 執行完成後，重導向回行程記錄列表。
-* **輸出**：
-  * 302 重導向至 `/history`。
-* **錯誤處理**：
-  * 若該 ID 不存在，直接重導向回 `/history` 並利用 Flask flash 提示錯誤。
+  * 若無速限變化或距離大於 300 公尺，回傳 `trigger_preview: false`。
 
 ---
 
 ## 3. Jinja2 模板清單
 
 ### 3.1 `app/templates/base.html`
-* **功能**：系統共用版型（全域布局）。
+* **功能**：系統共用網頁版型。
 * **區塊定義**：
-  * `{% block content %}`：供子模板置入主體畫面。
-  * `{% block extra_js %}`：供子模板置入額外的前端 Javascript（如 Google Maps API 初始化等）。
-* **元件**：包含全域導覽列（包含「首頁地圖」與「歷史行程」連結）、全域 CSS 引入。
+  * `{% block content %}`：子頁面主體渲染區。
+  * `{% block extra_js %}`：子頁面特定 JavaScript 載入區（地圖初始化、GPS 定位等）。
+* **全域元件**：包含頂部導覽列（「地圖儀表板」與「偏好設定」連結）、Leaflet.js 地圖庫的 CDN CSS/JS。
 
 ### 3.2 `app/templates/map.html`
 * **繼承**：`base.html`
-* **功能**：核心地圖操作與導航頁面。
-* **元件**：
-  * 目的地搜尋框、避開條件複選框 (避開擁擠路段、避開危險路口)。
-  * 高對比導航模式切換開關 (開啟時為網頁套用 `.high-contrast` 類別)。
+* **功能**：導航與警示主畫面。
+* **主要 UI 元件**：
   * 地圖展示區塊 (ID: `map`)。
-  * 語音提醒功能載入。
+  * 疊加的「即時車速/速限」圓形儀表板。
+  * 超速時覆蓋全螢幕的紅色閃爍遮罩（CSS 動畫）。
+  * 前方 300m 速限降低的預告圖示面板。
+  * 「開始導航」解鎖語音功能的大按鈕。
 
-### 3.3 `app/templates/history.html`
+### 3.3 `app/templates/settings.html`
 * **繼承**：`base.html`
-* **功能**：歷史行程清單頁面。
-* **元件**：
-  * 歷史紀錄表格（顯示欄位：目的地、避開條件、建立時間、解密後的路徑）。
-  * 刪除按鈕（每個項目都有一個小型 POST 表單，以呼叫 `/history/<id>/delete` 路由）。
+* **功能**：警示偏好設定畫面。
+* **主要 UI 元件**：
+  * 警告閾值設定（+0, +5, +10 km/h）下拉選單。
+  * 聲音警示開關（啟用/禁用）。
+  * 接近警告比例（85%、90%、95% 觸發黃色警示）滑桿。
+  * 送出儲存按鈕與 Flash 提示區。
