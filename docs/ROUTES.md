@@ -1,6 +1,6 @@
 # API 路由與頁面設計文件 (ROUTES.md)
 
-本文件規劃「機車安全速限警示與預告系統」的 Flask 路由（Routes），包含每個頁面的 URL 路徑、HTTP 方法、輸入/輸出、處理邏輯與對應的 Jinja2 模板。
+本文件規劃「機車路口待轉預告系統」的 Flask 路由（Routes），包含每個頁面的 URL 路徑、HTTP 方法、輸入/輸出、處理邏輯與對應的 Jinja2 模板。
 
 ---
 
@@ -8,11 +8,10 @@
 
 | 功能 | HTTP 方法 | URL 路徑 | 對應模板 | 說明 |
 |---|---|---|---|---|
-| 導航主頁 (地圖與儀表板) | GET | `/` | `app/templates/map.html` | 顯示 Leaflet 地圖、車速儀表板與超速變紅警示遮罩，啟動 GPS 監測。 |
-| 偏好設定頁面 | GET | `/settings` | `app/templates/settings.html` | 顯示警告聲開關、超速警示閾值及接近比例設定表單。 |
-| 更新偏好設定 | POST | `/settings` | — | 接收並更新使用者警示設定，更新後重導向回設定頁面。 |
-| 查詢當前路段速限 | POST | `/api/speed-limit` | — | 接收 GPS 座標，查詢並回傳當前路段的法定速限與道路名稱（JSON 格式）。 |
-| 前方速限預告查詢 | POST | `/api/route/preview` | — | 接收當前 GPS 座標，查詢前方 300 公尺是否有速限降低變化（JSON 格式）。 |
+| 導航主頁 (地圖與待轉倒數) | GET | `/` | `app/templates/map.html` | 顯示地圖、時速儀表板、待轉大圖標與剩餘公尺倒數，開啟 GPS 定位監控。 |
+| 偏好設定頁面 | GET | `/settings` | `app/templates/settings.html` | 顯示語音警示開關、預警公尺距離門檻與自動亮度調整設定表單。 |
+| 更新偏好設定 | POST | `/settings` | — | 接收並更新使用者待轉設定參數，成功後重導向回設定頁面。 |
+| 查詢最近路口待轉規則 | POST | `/api/intersection/check` | — | 接收 GPS 座標，查詢並回傳 50 公尺內最近的路口待轉規則與路口中心（JSON 格式）。 |
 
 ---
 
@@ -24,11 +23,12 @@
 * **對應模板**：`app/templates/map.html` (繼承 `base.html`)
 * **輸入**：無
 * **處理邏輯**：
-  * 直接渲染 `map.html`。
+  - 呼叫 `UserSettings.get_settings()` 獲取使用者偏好參數。
+  - 渲染 `map.html` 並傳遞設定變數。
 * **輸出**：
-  * 渲染後的 HTML 頁面。
+  - 渲染後的 HTML 頁面。
 * **錯誤處理**：
-  * 若模板不存在，Flask 將拋出 500 錯誤。
+  - 若模板不存在，Flask 將拋出 500 內部伺服器錯誤。
 
 ---
 
@@ -38,12 +38,10 @@
 * **對應模板**：`app/templates/settings.html` (繼承 `base.html`)
 * **輸入**：無
 * **處理邏輯**：
-  * 呼叫 `UserSettings.get_settings()` 獲取當前使用者的警示設定。
-  * 將設定傳遞至 `settings.html` 渲染。
+  - 呼叫 `UserSettings.get_settings()` 獲取目前使用者的待轉設定參數。
+  - 將設定傳遞至 `settings.html` 渲染。
 * **輸出**：
-  * 渲染後的 HTML 設定頁面。
-* **錯誤處理**：
-  * 若資料庫異常，使用 Default UserSettings 執行渲染，並用 Flash 提示使用者。
+  - 渲染後的 HTML 設定頁面。
 
 ---
 
@@ -52,114 +50,85 @@
 * **HTTP 方法**：`POST`
 * **對應模板**：無 (重導向)
 * **輸入**：
-  * **表單欄位 (form-data)**:
-    * `warning_threshold`: 超速警告門檻（整數，單位 km/h，必填）
-    * `enable_voice_alert`: 是否播放警告聲（整數 0 或 1，必填）
-    * `approaching_alert_ratio`: 接近速限警告比率（浮點數，如 0.9，必填）
+  - **表單欄位 (form-data)**:
+    - `warning_threshold`: 預告觸發門檻距離（整數，公尺）
+    - `enable_voice_alert`: 是否播放待轉語音警示（整數 0 或 1）
+    - `enable_auto_brightness`: 是否開啟自動亮度調整（整數 0 或 1）
 * **處理邏輯**：
-  * 驗證表單欄位資料。
-  * 呼叫 `UserSettings.update_settings(warning_threshold, enable_voice_alert, approaching_alert_ratio)` 更新 SQLite 資料庫。
-  * 成功後發送 Flash 成功訊息，並重導向回 `/settings`。
+  - 驗證表單輸入。
+  - 呼叫 `UserSettings.update_settings(...)` 更新資料庫。
+  - 傳送 Flash 成功訊息，重導向回 `/settings`。
 * **輸出**：
-  * 302 重導向至 `/settings`。
+  - 302 重導向至 `/settings`。
 * **錯誤處理**：
-  * 若欄位格式不符或遺失，重導向回 `/settings` 並顯示 Flash 錯誤提示。
+  - 欄位缺失或格式不合時，重導向回設定頁並以 Flash 顯示錯誤提示。
 
 ---
 
-### 2.4 查詢當前路段速限
-* **URL 路徑**：`/api/speed-limit`
+### 2.4 查詢最近路口待轉規則
+* **URL 路徑**：`/api/intersection/check`
 * **HTTP 方法**：`POST`
 * **對應模板**：無 (純 API 回傳 JSON)
 * **輸入**：
-  * **JSON Body**:
+  - **JSON Body**:
     ```json
     {
       "latitude": 25.0421,
-      "longitude": 121.5400
+      "longitude": 121.5352
     }
     ```
 * **處理邏輯**：
-  * 接收 JSON 請求，驗證 `latitude` 與 `longitude` 是否存在。
-  * 呼叫 `RoadSpeedLimit.find_nearest(latitude, longitude)` 查詢最近的道路段與距離。
-  * 若距離在合理範圍內（例如 50 公尺內），則視為騎士行駛在該路段，獲取其法定速限；若太遠則回傳預設速限。
+  - 接收 JSON 請求，驗證經緯度欄位是否為浮點數。
+  - 呼叫 `IntersectionLimit.find_nearest(latitude, longitude)` 查詢最近的路口。
+  - 比對距離：若投影距離大於 50 公尺，回傳 `match: false`；若在 50 公尺內，回傳待轉規則及路口中心座標。
 * **輸出**：
-  * **JSON Response (200 OK)**:
+  - **JSON Response (200 OK)**:
     ```json
     {
       "status": "success",
-      "road_name": "忠孝東路三段",
-      "speed_limit": 50,
-      "distance": 11.12
+      "match": true,
+      "intersection_name": "忠孝新生路口 (忠孝新生捷運站旁)",
+      "need_two_stage_turn": 1,
+      "center_lat": 25.042,
+      "center_lng": 121.535,
+      "distance": 12.45
     }
     ```
 * **錯誤處理**：
-  * 若缺少經緯度，回傳 400 Bad Request：
+  - 若缺少經緯度參數，回傳 400 Bad Request：
     ```json
     {
       "status": "error",
-      "message": "Missing latitude or longitude parameter"
+      "message": "缺少必要的經度 (longitude) 或緯度 (latitude) 參數"
     }
     ```
 
 ---
 
-### 2.5 前方速限預告查詢
-* **URL 路徑**：`/api/route/preview`
-* **HTTP 方法**：`POST`
-* **對應模板**：無 (純 API 回傳 JSON)
-* **輸入**：
-  * **JSON Body**:
-    ```json
-    {
-      "latitude": 25.0420,
-      "longitude": 121.5410
-    }
-    ```
-* **處理邏輯**：
-  * 接收當前 GPS 座標。
-  * 呼叫 `RoadSpeedLimit.find_nearest(latitude, longitude)` 找到當前行駛路段。
-  * 檢查該路段是否有前方速限變化（`upcoming_limit` 與 `upcoming_lat`/`upcoming_lng`）。
-  * 若有，計算當前位置到預告點的距離。如果距離在 300 公尺內且速限低於當前速限，則回傳預告警示資訊。
-* **輸出**：
-  * **JSON Response (200 OK)**:
-    ```json
-    {
-      "status": "success",
-      "trigger_preview": true,
-      "upcoming_limit": 40,
-      "distance_to_change": 201.48
-    }
-    ```
-* **錯誤處理**：
-  * 若無速限變化或距離大於 300 公尺，回傳 `trigger_preview: false`。
-
----
-
-## 3. Jinja2 模板清單
+## 3. Jinja2 模板規劃
 
 ### 3.1 `app/templates/base.html`
-* **功能**：系統共用網頁版型。
-* **區塊定義**：
-  * `{% block content %}`：子頁面主體渲染區。
-  * `{% block extra_js %}`：子頁面特定 JavaScript 載入區（地圖初始化、GPS 定位等）。
-* **全域元件**：包含頂部導覽列（「地圖儀表板」與「偏好設定」連結）、Leaflet.js 地圖庫的 CDN CSS/JS。
+* **功能**：全域通用排版。
+* **主要區塊**：
+  - `{% block content %}`：子頁面核心網頁內容渲染區。
+  - `{% block extra_js %}`：子頁面特定的 JavaScript 程式碼置放區。
+* **共用元件**：包含頂部導覽列連結、Leaflet.js 相關的 CSS 與 JS CDN 引入、以及 Flash 提示訊息的動態呈現區。
 
 ### 3.2 `app/templates/map.html`
 * **繼承**：`base.html`
-* **功能**：導航與警示主畫面。
-* **主要 UI 元件**：
-  * 地圖展示區塊 (ID: `map`)。
-  * 疊加的「即時車速/速限」圓形儀表板。
-  * 超速時覆蓋全螢幕的紅色閃爍遮罩（CSS 動畫）。
-  * 前方 300m 速限降低的預告圖示面板。
-  * 「開始導航」解鎖語音功能的大按鈕。
+* **功能**：地圖導航與待轉倒數提醒主介面。
+* **前端功能邏輯**：
+  - 初始化地圖與騎士 Marker。
+  - 每秒取得 GPS 經緯度，打 API 至 `/api/intersection/check`。
+  - 距離 `50m - 30m` 內，計算騎士與路口中心點之大圓距離並在儀表板中央即時顯示倒數（如：`剩餘 45m`）。
+  - 若首次踏入該路段，使用 Web Speech API 語音廣播「前方路口請待轉」。
+  - 整合感光感應器（Ambient Light Sensor），若周圍光線微弱，動態為 body 套用 `.night-mode` 調降畫面亮度。
 
 ### 3.3 `app/templates/settings.html`
 * **繼承**：`base.html`
-* **功能**：警示偏好設定畫面。
+* **功能**：警示與亮度調整偏好設定介面。
 * **主要 UI 元件**：
-  * 警告閾值設定（+0, +5, +10 km/h）下拉選單。
-  * 聲音警示開關（啟用/禁用）。
-  * 接近警告比例（85%、90%、95% 觸發黃色警示）滑桿。
-  * 送出儲存按鈕與 Flash 提示區。
+  - 語音播放開關開關（Switch Toggle）。
+  - 預警觸發距離設定（30m, 50m, 70m 單選鈕組）。
+  - 自動亮度調整開關。
+  - 表單儲存與返回首頁按鈕。
