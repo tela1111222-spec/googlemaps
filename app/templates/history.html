@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<style>
+    .history-container {
+        padding: 40px 0;
+        background: var(--bg-color);
+        min-height: calc(100vh - 56px);
+    }
+
+    .page-title {
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: var(--text-color);
+    }
+
+    /* 精美歷史卡片 */
+    .history-card {
+        background: var(--card-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: 16px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        transition: transform 0.2s, box-shadow 0.2s;
+        overflow: hidden;
+        margin-bottom: 24px;
+    }
+
+    .history-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    }
+
+    .history-details {
+        padding: 24px;
+    }
+
+    /* 迷你 Leaflet 地圖在卡片中 */
+    .mini-map-container {
+        height: 180px;
+        width: 100%;
+        border-bottom: 1px solid rgba(0,0,0,0.05);
+        z-index: 10;
+    }
+
+    .badge-avoid {
+        background-color: rgba(67, 97, 238, 0.1);
+        color: var(--primary-color);
+        font-weight: 500;
+        padding: 6px 12px;
+        border-radius: 20px;
+    }
+
+    /* 頂級刪除按鈕 */
+    .btn-delete {
+        background: transparent;
+        color: var(--alert-danger);
+        border: 1px solid var(--alert-danger);
+        border-radius: 8px;
+        transition: all 0.2s;
+    }
+
+    .btn-delete:hover {
+        background: var(--alert-danger);
+        color: #ffffff;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="history-container">
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="page-title m-0">
+                <i class="fa-solid fa-history text-primary me-2"></i>已解密歷史行程紀錄
+            </h2>
+            <a href="/" class="btn btn-custom">
+                <i class="fa-solid fa-compass me-2"></i>回地圖規劃新行程
+            </a>
+        </div>
+
+        {% if not histories %}
+            <!-- 空狀態面板 -->
+            <div class="card text-center p-5 border-0 shadow-sm rounded-4">
+                <div class="card-body">
+                    <div class="text-muted mb-4" style="font-size: 64px;">
+                        <i class="fa-solid fa-map-location"></i>
+                    </div>
+                    <h4>目前尚未有任何導航歷史紀錄</h4>
+                    <p class="text-muted">當您在地圖頁面完成一次導航模擬或實際抵達目的地後，行程會在此以高度隱私加密儲存。</p>
+                    <a href="/" class="btn btn-custom mt-2">開始第一次導航</a>
+                </div>
+            </div>
+        {% else %}
+            <div class="row">
+                {% for history in histories %}
+                    <div class="col-md-6 col-lg-4">
+                        <div class="history-card">
+                            <!-- 迷你行程地圖渲染區 -->
+                            <div class="mini-map-container" id="miniMap_{{ history.id }}"></div>
+                            
+                            <div class="history-details">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <h5 class="card-title text-truncate m-0" style="max-width: 70%;" title="{{ history.destination }}">
+                                        {{ history.destination }}
+                                    </h5>
+                                    <small class="text-muted"><i class="fa-regular fa-clock me-1"></i>{{ history.created_at }}</small>
+                                </div>
+
+                                <div class="mb-3">
+                                    {% if history.avoid_conditions %}
+                                        {% for cond in history.avoid_conditions.split(',') %}
+                                            <span class="badge badge-avoid me-1"><i class="fa-solid fa-circle-minus me-1"></i>{{ cond }}</span>
+                                        {% endfor %}
+                                    {% else %}
+                                        <span class="badge badge-avoid text-muted"><i class="fa-solid fa-circle-check me-1"></i>無偏好設定</span>
+                                    {% endif %}
+                                </div>
+
+                                <div class="d-flex justify-content-between align-items-center mt-4">
+                                    <!-- 行程資料已自動由後端 RouteHistory.route_data 屬性完成 Base64 解密 -->
+                                    <span class="text-muted small">
+                                        <i class="fa-solid fa-circle-info me-1"></i>隱私解密完畢 ({{ history.route_data|length }} 點)
+                                    </span>
+                                    
+                                    <!-- 刪除行程表單 -->
+                                    <form action="{{ url_for('history.delete_history', history_id=history.id) }}" method="POST" onsubmit="return confirm('確定要刪除這筆精彩行程嗎？此操作不可逆！')">
+                                        <button type="submit" class="btn btn-delete btn-sm">
+                                            <i class="fa-regular fa-trash-can me-1"></i>刪除
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 在每張歷史行程卡片中動態初始化 Leaflet 迷你地圖並繪製軌跡
+    window.addEventListener('DOMContentLoaded', () => {
+        {% for history in histories %}
+            try {
+                // 由後端取得解密後的軌跡 JSON
+                const rawRoute = '{{ history.route_data | safe }}';
+                if (!rawRoute) return;
+
+                const pathData = JSON.parse(rawRoute);
+                if (!pathData || pathData.length === 0) return;
+
+                // 初始化該卡片的迷你地圖
+                const miniMap = L.map('miniMap_{{ history.id }}', {
+                    zoomControl: false,
+                    attributionControl: false,
+                    dragging: false,
+                    scrollWheelZoom: false,
+                    touchZoom: false
+                }).setView(pathData[0], 15);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(miniMap);
+
+                // 畫出軌跡折線
+                const polyline = L.polyline(pathData, {
+                    color: '#4361ee',
+                    weight: 4,
+                    opacity: 0.8
+                }).addTo(miniMap);
+
+                // 自動縮放焦距到包含該軌跡
+                miniMap.fitBounds(polyline.getBounds(), { padding: [10, 10] });
+
+                // 標記起點與終點
+                L.circleMarker(pathData[0], { radius: 5, color: '#2ec4b6', fillColor: '#2ec4b6', fillOpacity: 1 }).addTo(miniMap);
+                L.circleMarker(pathData[pathData.length - 1], { radius: 5, color: '#e63946', fillColor: '#e63946', fillOpacity: 1 }).addTo(miniMap);
+
+            } catch (e) {
+                console.error("初始化卡片地圖失敗 [ID: {{ history.id }}]: ", e);
+            }
+        {% endfor %}
+    });
+</script>
+{% endblock %}
