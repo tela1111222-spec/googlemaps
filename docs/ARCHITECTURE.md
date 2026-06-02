@@ -1,19 +1,23 @@
-# 機車安全速限警示與預告系統架構文件
+# 機車路口待轉預告系統架構文件
 
 ## 1. 技術架構說明
 
-為了快速驗證概念並打造 MVP（最小可行性產品），本系統採用輕量級的 Python Flask 框架，搭配 Jinja2 作為前端模板渲染引擎，並使用 SQLite 作為後端資料庫。由於本系統為即時導航與警示系統，部分即時性要求極高的功能（如車速偵測、速限比對、畫面變紅與警告音效播放）將採用「後端提供速限數據與路徑計算，前端即時處理與渲染」的混合式架構。
+為了符合 MVP（最小可行性產品）低延遲、快速開發且易於展示的要求，本系統採用輕量級的 Python Flask 框架作為後端 API，搭配 Jinja2 模板渲染前端 HTML 頁面，並使用 SQLite 作為後端資料庫。
+由於機車行駛時，對警示與倒數的「即時性」要求極高，本系統採用**「混合式架構」**：後端資料庫負責儲存與檢索路口規則資料，前端瀏覽器則負責 GPS 位置監聽、兩點距離高頻率計算與倒數、夜間亮度濾鏡調整，以將網路延遲對騎士行車安全的影響降到最低。
 
 ### 選用技術與原因
-- **Python + Flask**：輕量、易於建置 API，能快速回傳路徑上的速限資料。
-- **Jinja2**：與 Flask 高度整合，用來快速渲染地圖主頁面及警示設定頁面。
-- **SQLite**：無須額外安裝資料庫伺服器，資料儲存於單一檔案中，適合儲存道路速限對照表與使用者設定。
-- **前端 Web API (HTML5 Geolocation & Web Audio)**：利用瀏覽器的 GPS 定位來獲取車速，並使用 Web Audio API 來即時播放警告聲，以符合低延遲的警示需求。
+- **Python + Flask**：輕量、易於建置且啟動迅速，適合用來提供路口檢索 API。
+- **Jinja2**：與 Flask 高度整合的模板引擎，負責一次性渲染地圖主頁及警示偏好設定頁面。
+- **SQLite**：無須安裝獨立資料庫伺服器，資料儲存於單一檔案中，適合儲存路口標誌對照表與使用者設定。
+- **前端 Web API (Geolocation, Speech Synthesis, CSS Filter)**：
+  - 利用瀏覽器的 HTML5 Geolocation API 獲取騎士即時位置；
+  - 使用 Web Speech API 的語音合成技術播放「前方路口請待轉」；
+  - 結合 CSS 濾鏡（Filters）或暗色系樣式表，實作環境偵測夜間降亮。
 
 ### Flask MVC 模式說明
-- **Model（模型）**：負責與 SQLite 進行互動。定義與管理「道路速限對照資料」（`RoadSpeedLimit`）以及「使用者警示偏好設定」（`AlertSettings`），處理資料庫讀寫。
-- **View（視圖）**：即 `templates` 下的 Jinja2 模板（如 `map.html`），負責呈現地圖、當前車速、道路速限以及超速時的視覺變化（如螢幕背景變紅）。
-- **Controller（控制器）**：即 Flask 的 Routes 路由，負責接收前端 GPS 座標請求、查詢該路段的法定速限與前方速限變化預告資訊，並回傳給前端。
+- **Model（模型）**：負責與 SQLite 進行互動。定義並管理`使用者設定`（`UserSettings`）與`路口待轉規則`（`IntersectionLimit`）的資料存取。
+- **View（視圖）**：即 `templates` 下的 HTML 模板。負責呈現地圖、路口待轉標誌視覺警示、螢幕亮度降低濾鏡，以及前 50 公尺的公尺數即時倒數。
+- **Controller（控制器）**：即 Flask 的 Routes 路由。負責接收前端傳來的經緯度，查詢離騎士最近的路口資訊並回傳 JSON 數據。
 
 ---
 
@@ -24,30 +28,26 @@
 ```text
 googlemaps/
 ├── app/
-│   ├── __init__.py          # Flask 應用程式初始化與資料庫連接設定
+│   ├── __init__.py          # Flask 應用程式初始化與資料庫連線管理
 │   ├── models/              # Model: 資料庫模型
-│   │   ├── speed_limit.py   # 道路與速限資料查詢模型
-│   │   └── user_settings.py # 使用者警告設定 (如警告門檻、是否開啟警告聲)
+│   │   ├── intersection.py  # 路口經緯度座標與待轉規則模型 (CRUD)
+│   │   └── user_settings.py # 使用者警告偏好設定 (語音開關、警示距離門檻)
 │   ├── routes/              # Controller: Flask 路由
-│   │   ├── main.py          # 地圖首頁與前端 API（速限查詢、路線規劃）
+│   │   ├── main.py          # 導航主頁、路口比對與待轉提醒 API
 │   │   └── settings.py      # 偏好設定路由
 │   ├── templates/           # View: Jinja2 HTML 模板
-│   │   ├── base.html        # 共用模板（含導覽列、基礎樣式載入）
-│   │   ├── map.html         # 主要導航地圖頁面（含車速模擬、速限顯示、變紅警告區）
-│   │   └── settings.html    # 警示偏好設定頁面
+│   │   ├── base.html        # 共用模板（含導覽列、Leaflet 地圖庫與樣式載入）
+│   │   ├── map.html         # 地圖與倒數儀表板（待轉大圖標、剩餘距離倒數、夜間感應濾鏡）
+│   │   └── settings.html    # 偏好設定頁面（調整警示音開關、亮度模式設定）
 │   └── static/              # 靜態資源
-│       ├── css/             # 樣式表
-│       │   └── style.css    # 包含正常模式、超速變紅（.speeding-alert）的 CSS
-│       ├── js/              # 前端邏輯
-│       │   ├── map.js       # 地圖與路徑渲染
-│       │   ├── speedometer.js # GPS 車速偵測與超速比對邏輯
-│       │   └── audio.js     # 警告聲播放控制 (Web Audio API)
-│       └── audio/
-│           └── alert.mp3    # 超速警告音效檔
+│       ├── css/
+│       │   └── style.css    # 包含夜間減光樣式（.night-mode）與高對比警示 CSS
+│       └── images/
+│           └── two_stage_turn.png  # 兩段式左轉警示標誌圖檔
 ├── instance/
-│   └── database.db          # SQLite 資料庫檔案
+│   └── database.db          # SQLite 實體資料庫檔案
 ├── database/
-│   └── schema.sql           # 資料庫 Schema 定義檔 (包含道路速限與設定表)
+│   └── schema.sql           # 資料庫 Schema 與初始模擬數據
 ├── docs/                    # 文件目錄
 │   ├── PRD.md               # 產品需求文件
 │   └── ARCHITECTURE.md      # 系統架構文件
@@ -60,65 +60,68 @@ googlemaps/
 
 ## 3. 元件關係圖
 
-以下呈現瀏覽器、Flask Route、Model、SQLite 之間，在「即時速限查詢與超速警示」以及「前方速限預告」時的元件互動流程：
+以下呈現瀏覽器前端、Flask 控制器、資料庫模型在「路口待轉警示與距離倒數」以及「環境偵測降亮」時的互動流程：
 
-### A. 即時車速比對與超速警示流程
+### A. 路口待轉預告與距離倒數流程
 ```mermaid
 sequenceDiagram
-    participant Browser as 瀏覽器 (HTML/JS)
+    participant Browser as 瀏覽器 (前端 JS)
     participant Route as Flask Route (Controller)
-    participant Model as Speed Limit Model
+    participant Model as Intersection Model
     participant DB as SQLite Database
     
-    Note over Browser: 透過 GPS 獲取目前座標與車速
-    Browser->>Route: 1. POST /api/speed-limit (目前座標)
-    Route->>Model: 2. 查詢當前座標路段速限
-    Model->>DB: 3. 檢索道路速限表
-    DB-->>Model: 4. 回傳法定速限 (如 50 km/h)
-    Model-->>Route: 5. 回傳速限數據
-    Route-->>Browser: 6. 回傳 JSON (limit: 50)
-    Note over Browser: 瀏覽器比對車速是否超速
-    alt 車速 > 速限
-        Browser->>Browser: 7a. 觸發視覺警示 (畫面背景變紅)
-        Browser->>Browser: 7b. 播放警告聲 (alert.mp3)
-    else 車速 <= 速限
-        Browser->>Browser: 8. 恢復正常顯示樣式
+    Note over Browser: 騎士開啟「真實 GPS 導航」
+    Browser->>Route: 1. POST /api/intersection/check (當前座標)
+    Route->>Model: 2. 檢索 50 公尺內最近路口
+    Model->>DB: 3. SELECT * FROM intersection_limits ...
+    DB-->>Model: 4. 回傳路口資訊 (路口座標, 是否需要待轉)
+    Model-->>Route: 5. 封裝路口對照資料
+    Route-->>Browser: 6. 回傳 JSON (need_turn: true, center_lat, center_lng)
+    
+    loop 每秒更新位置
+        Note over Browser: 瀏覽器利用 GPS 計算與路口中心距離 (d)
+        alt 距離 d 介於 30 至 50 公尺內 (警示區)
+            Browser->>Browser: 7a. 畫面顯示「待轉圖標」與「剩餘 d 公尺倒數」
+            Browser->>Browser: 7b. 播放語音「前方路口請兩段式轉彎」
+        else 距離 d < 30 公尺 或 d > 50 公尺
+            Browser->>Browser: 8. 恢復或維持正常導航地圖畫面
+        end
     end
 ```
 
-### B. 前方路段速限變化預告流程
+### B. 環境偵測降亮（夜間模式）流程
 ```mermaid
 sequenceDiagram
-    participant Browser as 瀏覽器 (HTML/JS)
-    participant Route as Flask Route (Controller)
-    participant Model as Speed Limit Model
-    participant DB as SQLite Database
-
-    Browser->>Route: 1. POST /api/route/preview (目前路徑與座標)
-    Route->>Model: 2. 檢索路徑前方 300 公尺之速限變化
-    Model->>DB: 3. 查詢該路徑後續路段速限
-    DB-->>Model: 4. 回傳前方路段速限資訊
-    Model-->>Route: 5. 回傳速限變化資料
-    Route-->>Browser: 6. 回傳 JSON (前方 300m 速限將降至 40 km/h)
-    Note over Browser: 在畫面上顯示預告警示圖標與提示
+    participant Browser as 瀏覽器 (JS)
+    participant Sensor as 光線感測器 (Ambient Light Sensor)
+    
+    alt 感測器支援且已授權
+        Sensor->>Browser: 傳送目前照度值 (lux)
+        alt 照度 < 10 lux (偏暗)
+            Browser->>Browser: 動態為網頁套用 .night-mode (調降螢幕亮度與切換暗色主題)
+        else 照度 >= 10 lux (明亮)
+            Browser->>Browser: 移除 .night-mode 恢復正常亮度
+        end
+    else 感測器不支援 (Fallback 機制)
+        Browser->>Browser: 依系統時間判斷是否在 18:00 至 06:00 之間
+        alt 是夜間時段
+            Browser->>Browser: 自動套用 .night-mode 暗色護眼濾鏡
+        end
+    end
 ```
 
 ---
 
 ## 4. 關鍵設計決策
 
-1. **混合式即時處理機制 (Hybrid Real-Time Processing)**
-   - **決策**：將車速監測、超速比對與警示（視覺變紅、播放警告聲）全部置於前端 JavaScript 執行，而速限數據則由後端 Flask + SQLite 提供。
-   - **原因**：如果每次車速改變都將資料傳回後端比對並等待後端回傳變色指令，將受限於網路延遲，無法達到 200 毫秒內的低延遲警示要求。前端本地進行車速與速限比對能保證毫秒級的即時反應。
+1. **前端高頻率距離倒數 (Client-Side Precision Distance Interpolation)**
+   - **決策**：後端 API 僅比對並回傳「最近待轉路口的中心座標與規定」，而距離路口的公尺數倒數（如 `48m... 42m...`）則由前端 JavaScript 以高頻率 GPS 位置更新，在本地進行大圓距離（Haversine 公式）即時運算。
+   - **原因**：若每次 GPS 位移都將座標送回後端計算距離再回傳，會受到網路傳輸延遲與伺服器處理時間影響，導致畫面的倒數數字出現「跳格」或卡頓，無法精確提醒騎士靠右或減速的最佳時機。
 
-2. **區段化前方速限預告演算法**
-   - **決策**：後端 API 接收車輛當前座標與前進方向，檢索前方 300 公尺內的道路速限。若發現有速限降低之交界點，則在 API 中計算距離並回傳給前端。
-   - **原因**：騎士行車速度較快，提前 300 公尺預告速限降低（例如從 60 降到 40）能提供約 15~20 秒的反應時間，足以讓騎士安全、平順地減速，避免緊急煞車造成的危險。
+2. **環境光感應與時間排程雙軌制 (Dual-Track Night Mode Trigger)**
+   - **決策**：使用瀏覽器原生的 `AmbientLightSensor` API 來感知周圍光線強度。若行動瀏覽器未開放此權限或不支援此感測器，系統會自動切換為「時間排程回退機制」（如系統時間在夜間 18:00 至 06:00 時觸發）。
+   - **原因**：目前多數行動瀏覽器出於隱私考量對環境光感測器有較嚴格的限制。雙軌制能確保夜間騎乘時，系統不論感測器是否運作，都能切換成夜間低亮度暗色模式，保護騎士夜視力。
 
-3. **輕量級 SQLite 空間座標網格化**
-   - **決策**：在 SQLite 中使用經緯度網格或路段 ID (Segment ID) 來建立道路速限索引，而非使用繁重的 GIS 擴充套件。
-   - **原因**：為了在無須複雜資料庫依賴的情況下於 SQLite 實作，利用簡單的座標範圍比對或路段代碼，即可快速檢索出當前位置的速限，並將路徑比對控制在 3 秒內。
-
-4. **Web Audio API 與使用者互動限制優化**
-   - **決策**：前端音效播放使用 Web Audio API，並在使用者首次點擊地圖「開始導航」時進行音訊上下文（AudioContext）解鎖。
-   - **原因**：現代瀏覽器出於安全與體驗考量，禁止網頁在無使用者互動的情況下自動播放聲音。透過引導使用者點擊「開始導航」來解鎖音效，可確保超速警示聲能順利且無延遲地播放。
+3. **50 公尺幾何地理圍欄 (Geofencing Detection Buffer)**
+   - **決策**：後端 API 及前端判定只在騎士進入路口周圍 50 公尺（待轉黃金反應區）時才觸發警示與倒數計時。
+   - **原因**：30~50 公尺在普通行車速限（40~50 km/h）下對應約 3~4 秒的反應時間，剛好是機車騎士收油門減速、查看燈號並安全朝右側車道切換的最佳反應緩衝距離。過早提醒（如 100 公尺前）會使警示干擾騎士日常行車，過晚提醒（如 20 公尺內）則容易造成緊急煞車的危險。
