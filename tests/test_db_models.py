@@ -12,6 +12,12 @@ from app.models.intersection import IntersectionLimit
 class TestDatabaseModels(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        db_path = 'instance/database.db'
+        if os.path.exists(db_path):
+            try:
+                os.remove(db_path)
+            except Exception:
+                pass
         init_db()
         cls.app = create_app()
 

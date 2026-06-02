@@ -7,74 +7,69 @@
             <div class="glass-card">
                 <div class="text-center mb-4">
                     <div class="display-6 fw-bold mb-2">
-                        <i class="fa-solid fa-sliders text-primary me-2"></i>警示偏好設定
+                        <i class="fa-solid fa-sliders text-primary me-2"></i>待轉預告設定
                     </div>
-                    <p class="text-muted">客製化您的騎乘速度安全警示設定</p>
+                    <p class="text-muted">客製化您的路口待轉與亮度警示設定</p>
                 </div>
 
                 <hr class="mb-4" style="border-top: 1px solid var(--panel-border);">
 
                 <form action="{{ url_for('settings.update_settings') }}" method="POST">
-                    <!-- 1. 超速警告門檻 -->
+                    <!-- 1. 預警公尺距離門檻 -->
                     <div class="mb-4">
                         <label class="form-label fw-bold mb-3 d-block">
-                            <i class="fa-solid fa-triangle-exclamation text-warning me-2"></i>超速警告門檻
+                            <i class="fa-solid fa-location-arrow text-warning me-2"></i>待轉預告距離門檻
                         </label>
                         <div class="row g-3">
                             <div class="col-4">
-                                <input type="radio" class="btn-check" name="warning_threshold" id="threshold_0" value="0" {% if settings.warning_threshold == 0 %}checked{% endif %}>
-                                <label class="btn btn-outline-primary w-100 py-3" for="threshold_0">
-                                    <div class="fw-bold fs-5">+0</div>
-                                    <small class="text-muted">即時警示</small>
+                                <input type="radio" class="btn-check" name="warning_threshold" id="threshold_30" value="30" {% if settings.warning_threshold == 30 %}checked{% endif %}>
+                                <label class="btn btn-outline-primary w-100 py-3" for="threshold_30">
+                                    <div class="fw-bold fs-5">30m</div>
+                                    <small class="text-muted">較短反應</small>
                                 </label>
                             </div>
                             <div class="col-4">
-                                <input type="radio" class="btn-check" name="warning_threshold" id="threshold_5" value="5" {% if settings.warning_threshold == 5 %}checked{% endif %}>
-                                <label class="btn btn-outline-primary w-100 py-3" for="threshold_5">
-                                    <div class="fw-bold fs-5">+5</div>
-                                    <small class="text-muted">容許 5 km/h</small>
+                                <input type="radio" class="btn-check" name="warning_threshold" id="threshold_50" value="50" {% if settings.warning_threshold == 50 %}checked{% endif %}>
+                                <label class="btn btn-outline-primary w-100 py-3" for="threshold_50">
+                                    <div class="fw-bold fs-5">50m</div>
+                                    <small class="text-muted">標準反應</small>
                                 </label>
                             </div>
                             <div class="col-4">
-                                <input type="radio" class="btn-check" name="warning_threshold" id="threshold_10" value="10" {% if settings.warning_threshold == 10 %}checked{% endif %}>
-                                <label class="btn btn-outline-primary w-100 py-3" for="threshold_10">
-                                    <div class="fw-bold fs-5">+10</div>
-                                    <small class="text-muted">容許 10 km/h</small>
+                                <input type="radio" class="btn-check" name="warning_threshold" id="threshold_70" value="70" {% if settings.warning_threshold == 70 %}checked{% endif %}>
+                                <label class="btn btn-outline-primary w-100 py-3" for="threshold_70">
+                                    <div class="fw-bold fs-5">70m</div>
+                                    <small class="text-muted">提早反應</small>
                                 </label>
                             </div>
                         </div>
-                        <div class="form-text text-muted mt-2">設定容許超出法定速限之值。超過此值即會觸發超速警示（螢幕變紅與警示聲）。</div>
+                        <div class="form-text text-muted mt-2">設定在距離待轉路口多少公尺前開始顯示圖示與進行語音預告。</div>
                     </div>
 
-                    <!-- 2. 聲音警示開關 -->
-                    <div class="mb-4 glass-card p-3" style="background: rgba(15, 23, 42, 0.3);">
+                    <!-- 2. 語音提示開關 -->
+                    <div class="mb-4 glass-card p-3" style="background: rgba(15, 23, 42, 0.3); border-color: rgba(255,255,255,0.05);">
                         <div class="form-check form-switch d-flex justify-content-between align-items-center p-0">
                             <div>
                                 <label class="form-check-label fw-bold d-block" for="enable_voice_alert">
-                                    <i class="fa-solid fa-volume-high text-success me-2"></i>啟用警示聲響
+                                    <i class="fa-solid fa-volume-high text-success me-2"></i>啟用語音提示
                                 </label>
-                                <small class="text-muted">超速時發出警示警告音效（適用藍牙耳機）</small>
+                                <small class="text-muted">進入警示區時播放語音「前方路口請待轉」</small>
                             </div>
                             <input class="form-check-input ms-0" type="checkbox" role="switch" id="enable_voice_alert" name="enable_voice_alert" value="1" style="width: 2.5rem; height: 1.25rem;" {% if settings.enable_voice_alert == 1 %}checked{% endif %}>
                         </div>
                     </div>
 
-                    <!-- 3. 接近警告比例 -->
-                    <div class="mb-5">
-                        <div class="d-flex justify-content-between mb-2">
-                            <label for="approaching_alert_ratio" class="form-label fw-bold">
-                                <i class="fa-solid fa-bullseye text-info me-2"></i>接近速限預先警告比例
-                            </label>
-                            <span class="badge bg-info" id="ratio_val">{{ (settings.approaching_alert_ratio * 100) | int }}%</span>
+                    <!-- 3. 自動亮度模式開關 -->
+                    <div class="mb-5 glass-card p-3" style="background: rgba(15, 23, 42, 0.3); border-color: rgba(255,255,255,0.05);">
+                        <div class="form-check form-switch d-flex justify-content-between align-items-center p-0">
+                            <div>
+                                <label class="form-check-label fw-bold d-block" for="enable_auto_brightness">
+                                    <i class="fa-solid fa-moon text-info me-2"></i>啟用自動亮度與夜間模式
+                                </label>
+                                <small class="text-muted">感應弱光或於夜間時段自動調降螢幕亮度並套用暗色濾鏡</small>
+                            </div>
+                            <input class="form-check-input ms-0" type="checkbox" role="switch" id="enable_auto_brightness" name="enable_auto_brightness" value="1" style="width: 2.5rem; height: 1.25rem;" {% if settings.enable_auto_brightness == 1 %}checked{% endif %}>
                         </div>
-                        <input type="range" class="form-range" id="approaching_alert_ratio" name="approaching_alert_ratio" min="0.5" max="1.0" step="0.05" value="{{ settings.approaching_alert_ratio }}">
-                        <div class="d-flex justify-content-between fs-xs text-muted">
-                            <span>50%</span>
-                            <span>75%</span>
-                            <span>90% (推薦)</span>
-                            <span>100% (不提早警告)</span>
-                        </div>
-                        <div class="form-text text-muted mt-2">當車速達到法定速限的此比例時，介面會顯示黃色視覺警示，提醒您接近速限。</div>
                     </div>
 
                     <!-- 儲存按鈕 -->
@@ -94,14 +89,4 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-    // 即時更新滑桿數值顯示
-    const ratioSlider = document.getElementById('approaching_alert_ratio');
-    const ratioVal = document.getElementById('ratio_val');
-    
-    ratioSlider.addEventListener('input', function() {
-        const val = Math.round(parseFloat(this.value) * 100);
-        ratioVal.textContent = val + '%';
-    });
-</script>
 {% endblock %}

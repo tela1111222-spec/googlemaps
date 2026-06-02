@@ -283,3 +283,21 @@ body.high-contrast #map {
 body.high-contrast .leaflet-container {
     filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(120%);
 }
+
+/* ==========================================================================
+   夜間模式 (Night Mode) - 環境偵測弱光降亮
+   ========================================================================== */
+body.night-mode {
+    filter: brightness(60%) contrast(110%);
+    background: #000000 !important;
+    transition: all 0.5s ease;
+}
+
+body.night-mode img {
+    filter: brightness(80%);
+}
+
+body.night-mode .glass-card {
+    background: rgba(15, 23, 42, 0.95) !important;
+    border-color: rgba(255, 255, 255, 0.05) !important;
+}
