@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>個人化機車路徑系統</title>
+    <title>機車安全速限警示與預告系統</title>
     <!-- Google Fonts Outfit & Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Bootstrap 5 CSS -->
@@ -21,7 +21,7 @@
     <nav class="navbar navbar-expand-lg navbar-dark glass-nav sticky-top">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('main.index') }}">
-                <i class="fa-solid fa-motorcycle me-2"></i>MOTO NAVI
+                <i class="fa-solid fa-motorcycle me-2"></i>SPEED ALERTER
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -30,12 +30,12 @@
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('main.index') }}">
-                            <i class="fa-solid fa-map me-1"></i> 地圖導航
+                            <i class="fa-solid fa-map me-1"></i> 地圖儀表板
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('history.list_history') }}">
-                            <i class="fa-solid fa-clock-rotate-left me-1"></i> 歷史行程
+                        <a class="nav-link" href="{{ url_for('settings.view_settings') }}">
+                            <i class="fa-solid fa-gears me-1"></i> 偏好設定
                         </a>
                     </li>
                 </ul>
@@ -72,7 +72,7 @@
     <!-- Footer -->
     <footer class="py-3 text-center text-muted" style="border-top: 1px solid var(--panel-border); font-size: 0.85rem;">
         <div class="container">
-            <p class="mb-0">&copy; 2026 MOTO NAVI. All rights reserved. 整合個人化路徑系統 MVP</p>
+            <p class="mb-0">&copy; 2026 SPEED ALERTER. All rights reserved. 機車安全速限警示與預告系統 MVP</p>
         </div>
     </footer>
 

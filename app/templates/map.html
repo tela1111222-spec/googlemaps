@@ -1,242 +1,654 @@
 {% extends "base.html" %}
 
 {% block content %}
+<!-- 全螢幕超速警示遮罩 (用以在超速時閃爍紅色) -->
+<div id="speed-alert-mask" class="d-none position-fixed top-0 start-0 w-100 h-100" 
+     style="z-index: 9999; pointer-events: none; mix-blend-mode: color-burn; animation: pulse-red 0.8s infinite;">
+</div>
+
 <div class="container-fluid px-4">
     <div class="row g-4">
-        <!-- 左側控制面板 -->
-        <div class="col-lg-4 col-md-5">
-            <div class="glass-card h-100 d-flex flex-column justify-content-between">
-                <div>
-                    <h3 class="mb-4"><i class="fa-solid fa-route me-2 text-info"></i>個人化路線規劃</h3>
-                    
-                    <!-- 高對比切換 -->
-                    <div class="form-check form-switch mb-4">
-                        <input class="form-check-input" type="checkbox" id="highContrastToggle">
-                        <label class="form-check-label fw-bold text-warning" for="highContrastToggle">
-                            <i class="fa-solid fa-circle-half-stroke me-1"></i> 高對比導航模式 (烈日/老人偏好)
-                        </label>
-                    </div>
-
-                    <!-- 計算路線表單 -->
-                    <form id="calcForm" class="mb-4">
-                        <div class="mb-3">
-                            <label for="destinationInput" class="form-label fw-bold">輸入目的地</label>
-                            <div class="input-group">
-                                <span class="input-group-text bg-dark border-secondary text-light"><i class="fa-solid fa-location-dot"></i></span>
-                                <input type="text" class="form-control custom-input" id="destinationInput" placeholder="例如：台北 101, 淡水漁人碼頭" required>
-                            </div>
-                        </div>
-
-                        <div class="mb-4">
-                            <label class="form-label fw-bold d-block">個人化避開條件 (機車安全考量)</label>
-                            <div class="form-check form-check-inline me-3">
-                                <input class="form-check-input" type="checkbox" id="avoidTraffic" value="擁擠路段">
-                                <label class="form-check-label" for="avoidTraffic">避開擁擠路段</label>
-                            </div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" id="avoidDanger" value="危險路口">
-                                <label class="form-check-label" for="avoidDanger">避開危險路口</label>
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn btn-premium w-100" id="btnCalculate">
-                            <i class="fa-solid fa-compass me-2"></i> 計算個人化路線
-                        </button>
-                    </form>
-
-                    <!-- 導航語音狀態面板 (預設隱藏) -->
-                    <div id="statusPanel" class="status-panel d-none">
-                        <i class="fa-solid fa-volume-high fa-beat me-2"></i>
-                        <span id="statusText">語音助理已就緒...</span>
-                    </div>
-                </div>
-
-                <!-- 導航控制與儲存按鈕 -->
-                <div class="mt-4">
-                    <button id="btnStartNav" class="btn btn-success w-100 py-3 mb-2 d-none fw-bold" style="border-radius: 10px;">
-                        <i class="fa-solid fa-play me-2"></i> 開始導航 (語音提示)
-                    </button>
-
-                    <!-- 儲存行程隱藏表單 -->
-                    <form id="saveHistoryForm" action="{{ url_for('history.save_history') }}" method="POST" class="d-none">
-                        <input type="hidden" name="destination" id="saveDestination">
-                        <input type="hidden" name="avoid_conditions" id="saveAvoidConditions">
-                        <input type="hidden" name="route_data" id="saveRouteData">
-                        <button type="submit" id="btnSaveHistory" class="btn btn-outline-info w-100 py-3 fw-bold" style="border-radius: 10px;">
-                            <i class="fa-solid fa-floppy-disk me-2"></i> 儲存此行程紀錄
-                        </button>
-                    </form>
+        <!-- 1. 左側地圖展示區 -->
+        <div class="col-lg-8">
+            <div class="position-relative">
+                <div id="map"></div>
+                <!-- 地圖疊加提示 -->
+                <div class="position-absolute bottom-0 start-0 m-3 p-2 bg-dark bg-opacity-75 rounded text-white small" style="z-index: 1000;">
+                    <i class="fa-solid fa-circle-info text-info me-1"></i> 地圖藍色線段為模擬行駛道路段，紅色標記為前方速限降低預告點。
                 </div>
             </div>
         </div>
+        
+        <!-- 2. 右側儀表板與模擬器控制 -->
+        <div class="col-lg-4">
+            <!-- 2.1 主儀表板 -->
+            <div class="glass-card mb-4 text-center d-flex flex-column align-items-center justify-content-center p-4">
+                <!-- 道路名稱與定位狀態 -->
+                <div class="mb-3">
+                    <span class="badge bg-secondary mb-1" id="gps-status"><i class="fa-solid fa-location-crosshairs me-1"></i>定位準備就緒</span>
+                    <h3 class="fw-bold mb-1" id="current-road-name">點擊「開始導航」</h3>
+                    <p class="text-muted small mb-0" id="current-coords">座標: --, --</p>
+                </div>
+                
+                <!-- 圓形車速與速限儀表板 -->
+                <div class="position-relative my-4" style="width: 220px; height: 220px;">
+                    <!-- 外圈環 -->
+                    <div id="speed-gauge-border" class="position-absolute top-0 start-0 w-100 h-100 rounded-circle border border-5 border-secondary" style="transition: all 0.2s ease;"></div>
+                    
+                    <!-- 中央車速顯示 -->
+                    <div class="position-absolute top-50 start-50 translate-middle text-center">
+                        <div class="display-1 fw-bold lh-1 mb-1" id="current-speed">0</div>
+                        <div class="text-uppercase text-muted fs-xs font-monospace">km/h</div>
+                    </div>
+                    
+                    <!-- 速限圓標 (右上角重疊) -->
+                    <div class="position-absolute bg-white text-dark border border-danger border-4 rounded-circle d-flex align-items-center justify-content-center" 
+                         style="width: 65px; height: 65px; top: -5px; right: -5px; font-weight: 900; font-size: 1.6rem; box-shadow: 0 4px 12px rgba(0,0,0,0.4);" 
+                         id="speed-limit-circle">
+                         --
+                    </div>
+                </div>
 
-        <!-- 右側地圖視窗 -->
-        <div class="col-lg-8 col-md-7">
-            <div id="map"></div>
+                <!-- 警示狀態指示器 -->
+                <div class="w-100 py-2 rounded mb-3 text-center fw-bold text-uppercase fs-sm border" id="alert-indicator" 
+                     style="background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1); color: var(--text-secondary); transition: all 0.2s ease;">
+                    未開始導航
+                </div>
+
+                <!-- 前方速限預告面板 -->
+                <div class="w-100 p-3 rounded mb-3 d-none" id="preview-panel" 
+                     style="background: rgba(245, 158, 11, 0.15); border: 2px dashed #f59e0b; color: #f59e0b; transition: all 0.3s ease;">
+                    <div class="d-flex align-items-center justify-content-center gap-3">
+                        <i class="fa-solid fa-circle-chevron-down fs-3 animate-bounce"></i>
+                        <div class="text-start">
+                            <div class="fw-bold fs-5">前方 <span id="preview-distance">--</span>m 速限將降至 <span id="preview-speed">--</span></div>
+                            <small class="d-block" style="font-size: 0.8rem; opacity: 0.85;">請提早收油門安全減速</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 按鈕列 -->
+                <div class="d-grid gap-2 w-100">
+                    <button class="btn-premium btn-lg" id="start-nav-btn">
+                        <i class="fa-solid fa-play me-2"></i>開始導航 (解鎖音效)
+                    </button>
+                    <button class="btn btn-outline-warning" id="contrast-toggle-btn">
+                        <i class="fa-solid fa-circle-half-stroke me-2"></i>切換高對比模式
+                    </button>
+                </div>
+            </div>
+
+            <!-- 2.2 定位與騎乘模式控制 -->
+            <div class="glass-card">
+                <h5 class="fw-bold mb-3 text-info"><i class="fa-solid fa-location-arrow me-2"></i>定位與騎乘控制</h5>
+                
+                <!-- 選擇運作模式 -->
+                <div class="mb-3">
+                    <label class="form-label text-secondary small fw-bold">1. 選擇定位模式</label>
+                    <div class="d-flex gap-2">
+                        <input type="radio" class="btn-check" name="navigation-mode" id="mode-sim" value="sim" checked>
+                        <label class="btn btn-outline-info flex-fill" for="mode-sim">
+                            <i class="fa-solid fa-laptop-code me-1"></i> 模擬模式
+                        </label>
+                        
+                        <input type="radio" class="btn-check" name="navigation-mode" id="mode-gps" value="gps">
+                        <label class="btn btn-outline-info flex-fill" for="mode-gps">
+                            <i class="fa-solid fa-satellite-dish me-1"></i> 真實 GPS
+                        </label>
+                    </div>
+                </div>
+
+                <div id="sim-controls">
+                    <!-- 選擇模擬路段 -->
+                    <div class="mb-3">
+                        <label class="form-label text-secondary small">2. 選擇模擬騎乘路段</label>
+                        <select class="form-select custom-input" id="sim-road-select">
+                            <option value="chongyang">忠孝東路三段 (速限 50 / 前方預告降速 40)</option>
+                            <option value="beiyi">北宜公路30K (速限 40 / 無速限變化)</option>
+                        </select>
+                    </div>
+
+                    <!-- 模擬行駛進度 -->
+                    <div class="mb-3">
+                        <label class="form-label text-secondary small d-flex justify-content-between">
+                            <span>3. 模擬行車進度 (沿道路移動)</span>
+                            <span class="fw-bold text-info" id="sim-progress-val">0%</span>
+                        </label>
+                        <input type="range" class="form-range" id="sim-progress-slider" min="0" max="100" value="0" disabled>
+                    </div>
+
+                    <!-- 模擬行車時速 -->
+                    <div class="mb-3">
+                        <label class="form-label text-secondary small d-flex justify-content-between">
+                            <span>4. 模擬行車時速</span>
+                            <span class="fw-bold text-info" id="sim-speed-val">0 km/h</span>
+                        </label>
+                        <input type="range" class="form-range" id="sim-speed-slider" min="0" max="80" value="0" disabled>
+                    </div>
+                </div>
+                
+                <div id="gps-instructions" class="d-none mb-3 p-3 rounded" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2);">
+                    <div class="text-info small fw-bold mb-1"><i class="fa-solid fa-circle-info me-1"></i>真實 GPS 模式說明</div>
+                    <div class="text-secondary" style="font-size: 0.8rem; line-height: 1.4;">
+                        系統將使用您行動裝置的 GPS 晶片進行即時定位，並監測您的行車速度。請確保已開啟手機的定位服務，並允許此網站取得定位權限。
+                    </div>
+                </div>
+                
+                <div class="form-text text-muted small mt-2" id="controls-help-text">
+                    <i class="fa-solid fa-circle-question me-1"></i>
+                    請先點擊上方**「開始導航」**解鎖瀏覽器音效功能，即可拖動滑桿模擬騎士行駛位置與車速。
+                </div>
+            </div>
         </div>
     </div>
 </div>
+
+<!-- 動態 CSS 動畫與自訂微調樣式 -->
+<style>
+@keyframes pulse-red {
+    0% { background-color: rgba(239, 68, 68, 0); }
+    50% { background-color: rgba(239, 68, 68, 0.45); }
+    100% { background-color: rgba(239, 68, 68, 0); }
+}
+.animate-bounce {
+    animation: bounce 1.2s infinite;
+}
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+/* 速限圓標在超速時閃爍紅色 */
+.limit-alert-flash {
+    animation: limit-flash 0.8s infinite;
+}
+@keyframes limit-flash {
+    0% { border-color: #ef4444; box-shadow: 0 0 0px #ef4444; }
+    50% { border-color: #f87171; box-shadow: 0 0 15px #ef4444; }
+    100% { border-color: #ef4444; box-shadow: 0 0 0px #ef4444; }
+}
+</style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    // 初始化地圖 (預設中心為台北車站)
-    const map = L.map('map').setView([25.0479, 121.5173], 14);
+    // 讀取從後端經由 Jinja2 傳遞的 UserSettings 設定參數
+    const warningThreshold = parseInt("{{ settings.warning_threshold }}");
+    const enableVoiceAlert = parseInt("{{ settings.enable_voice_alert }}");
+    const approachingAlertRatio = parseFloat("{{ settings.approaching_alert_ratio }}");
 
-    // 一般地圖圖層 (CartoDB Dark Matter)
-    const darkTile = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 20
-    }).addTo(map);
+    // 全域變數
+    let map;
+    let riderMarker;
+    let roadPolyline;
+    let upcomingMarker = null;
+    let isNavigating = false;
+    let soundIntervalId = null;
 
-    // 高對比地圖圖層 (OpenStreetMap)
-    const contrastTile = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-    });
+    // GPS 追蹤相關變數
+    let gpsWatchId = null;
+    let lastGpsCoords = null;
+    let lastGpsTime = null;
 
-    let currentRouteLine = null;
-    let startMarker = null;
-    let endMarker = null;
-    let routeCoords = null;
-    let routeDesc = "";
-
-    // 目的地與條件全域變數
-    let targetDestination = "";
-    let appliedAvoidConditions = "";
-    let rawRouteDataJson = "";
-
-    // 高對比模式切換
-    const hcsToggle = document.getElementById('highContrastToggle');
-    hcsToggle.addEventListener('change', function() {
-        if (this.checked) {
-            document.body.classList.add('high-contrast');
-            map.removeLayer(darkTile);
-            contrastTile.addTo(map);
-        } else {
-            document.body.classList.remove('high-contrast');
-            map.removeLayer(contrastTile);
-            darkTile.addTo(map);
+    // 模擬路段之經緯度座標數據
+    const roadCoords = {
+        chongyang: {
+            start: [25.042, 121.535],
+            end: [25.042, 121.545],
+            upcoming: [25.042, 121.543]
+        },
+        beiyi: {
+            start: [24.985, 121.580],
+            end: [24.970, 121.590],
+            upcoming: null
         }
-        map.invalidateSize();
-    });
+    };
 
-    // 語音播報輔助功能 (Web Speech API)
-    function speak(text) {
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel(); // 停止目前播放
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'zh-TW';
-            utterance.rate = 1.0;
-            window.speechSynthesis.speak(utterance);
+    // 目前行駛狀態資訊
+    let currentLimit = null;
+    let currentSpeed = 0;
 
-            // 更新語音面板狀態
-            const statusPanel = document.getElementById('statusPanel');
-            const statusText = document.getElementById('statusText');
-            statusPanel.classList.remove('d-none');
-            statusText.innerText = text;
-        } else {
-            console.log("不支援 Web Speech API");
+    // 初始化 Leaflet 地圖
+    function initMap() {
+        // 預設中心點設在台北車站附近
+        map = L.map('map').setView([25.0479, 121.5173], 14);
+        
+        // 載入 OpenStreetMap 圖磚
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        // 建立騎士定位 Marker (自訂顏色或預設)
+        riderMarker = L.marker([25.0479, 121.5173]).addTo(map);
+        riderMarker.bindPopup("<b>目前位置</b>").openPopup();
+
+        // 預設載入一條道路線段
+        drawRoadLine('chongyang');
+    }
+
+    // 繪製模擬道路線段
+    function drawRoadLine(roadType) {
+        if (roadPolyline) {
+            map.removeLayer(roadPolyline);
+        }
+        if (upcomingMarker) {
+            map.removeLayer(upcomingMarker);
+            upcomingMarker = null;
+        }
+
+        const data = roadCoords[roadType];
+        
+        // 畫出藍色路線
+        roadPolyline = L.polyline([data.start, data.end], {
+            color: '#3b82f6',
+            weight: 6,
+            opacity: 0.8
+        }).addTo(map);
+
+        // 若有預告降速點，在地圖上以紅色圓標記表示
+        if (data.upcoming) {
+            upcomingMarker = L.circleMarker(data.upcoming, {
+                color: '#ef4444',
+                fillColor: '#f87171',
+                fillOpacity: 0.9,
+                radius: 8
+            }).addTo(map);
+            upcomingMarker.bindPopup("<b>前方速限降低預告點</b>");
+        }
+
+        // 重新調整地圖範圍以完整容納此線段
+        map.fitBounds(roadPolyline.getBounds(), { padding: [50, 50] });
+    }
+
+    // 計算大圓距離（公尺）- 用於 GPS 速度計算
+    function distanceInMeters(lat1, lng1, lat2, lng2) {
+        const R = 6371000.0;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+
+    // 1. Web Audio API 音效合成器 (免除 mp3 資源加載問題，即時產生警示音)
+    let audioCtx = null;
+    function playWarningBeep() {
+        if (enableVoiceAlert !== 1) return;
+        
+        try {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'sine'; // 正弦波
+            osc.frequency.setValueAtTime(950, audioCtx.currentTime); // 950Hz 警示音
+
+            gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+            // 音量線性衰減
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.35);
+        } catch (e) {
+            console.error("音效播放失敗: ", e);
         }
     }
 
-    // 表單提交 -> 計算路線
-    const calcForm = document.getElementById('calcForm');
-    calcForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const destination = document.getElementById('destinationInput').value.trim();
-        const avoids = [];
-        if (document.getElementById('avoidTraffic').checked) avoids.push('擁擠路段');
-        if (document.getElementById('avoidDanger').checked) avoids.push('危險路口');
-        const avoid_conditions = avoids.join(',');
+    // 啟動或停止超速聲音警示輪詢
+    function toggleSoundAlert(isSpeeding) {
+        if (isSpeeding) {
+            if (!soundIntervalId) {
+                // 每 1.2 秒播放一次 beep 聲
+                playWarningBeep();
+                soundIntervalId = setInterval(playWarningBeep, 1200);
+            }
+        } else {
+            if (soundIntervalId) {
+                clearInterval(soundIntervalId);
+                soundIntervalId = null;
+            }
+        }
+    }
 
-        // 鎖定計算按鈕
-        const btnCalculate = document.getElementById('btnCalculate');
-        btnCalculate.disabled = true;
-        btnCalculate.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i> 計算中...';
+    // 2. 核心邏輯：比對車速、速限與警示設定，更新前端畫面
+    function checkSpeedAndAlerts() {
+        const speedText = document.getElementById('current-speed');
+        const alertIndicator = document.getElementById('alert-indicator');
+        const borderGauge = document.getElementById('speed-gauge-border');
+        const mask = document.getElementById('speed-alert-mask');
+        const limitCircle = document.getElementById('speed-limit-circle');
 
-        // 呼叫後端 API
-        fetch('/api/routes/calculate', {
+        speedText.textContent = currentSpeed;
+
+        if (!isNavigating) {
+            alertIndicator.textContent = "未開始導航";
+            alertIndicator.style.background = "rgba(255, 255, 255, 0.05)";
+            alertIndicator.style.color = "var(--text-secondary)";
+            borderGauge.className = "position-absolute top-0 start-0 w-100 h-100 rounded-circle border border-5 border-secondary";
+            limitCircle.className = "position-absolute bg-white text-dark border border-danger border-4 rounded-circle d-flex align-items-center justify-content-center";
+            mask.classList.add('d-none');
+            toggleSoundAlert(false);
+            return;
+        }
+
+        if (currentLimit === null) return;
+
+        // 計算超速與接近門檻
+        const speedingThreshold = currentLimit + warningThreshold;
+        const approachingSpeed = currentLimit * approachingAlertRatio;
+
+        if (currentSpeed > speedingThreshold) {
+            // 超速狀態：螢幕背景變紅閃爍、紅色圈限速、顯示超速
+            alertIndicator.textContent = `超速警告！速限 ${currentLimit} km/h`;
+            alertIndicator.style.background = "rgba(239, 68, 68, 0.25)";
+            alertIndicator.style.borderColor = "#ef4444";
+            alertIndicator.style.color = "#f87171";
+
+            borderGauge.className = "position-absolute top-0 start-0 w-100 h-100 rounded-circle border border-5 border-danger";
+            limitCircle.className = "position-absolute bg-white text-dark border border-danger border-4 rounded-circle d-flex align-items-center justify-content-center limit-alert-flash";
+            
+            mask.classList.remove('d-none');
+            toggleSoundAlert(true);
+        } 
+        else if (currentSpeed >= approachingSpeed) {
+            // 接近速限狀態：黃色視覺警告框、正常圓標、無警示聲
+            alertIndicator.textContent = `接近速限！請注意車速`;
+            alertIndicator.style.background = "rgba(245, 158, 11, 0.15)";
+            alertIndicator.style.borderColor = "#f59e0b";
+            alertIndicator.style.color = "#fbbf24";
+
+            borderGauge.className = "position-absolute top-0 start-0 w-100 h-100 rounded-circle border border-5 border-warning";
+            limitCircle.className = "position-absolute bg-white text-dark border border-danger border-4 rounded-circle d-flex align-items-center justify-content-center";
+            
+            mask.classList.add('d-none');
+            toggleSoundAlert(false);
+        } 
+        else {
+            // 正常狀態：綠色/一般框、正常速限
+            alertIndicator.textContent = "車速安全";
+            alertIndicator.style.background = "rgba(16, 185, 129, 0.15)";
+            alertIndicator.style.borderColor = "#10b981";
+            alertIndicator.style.color = "#34d399";
+
+            borderGauge.className = "position-absolute top-0 start-0 w-100 h-100 rounded-circle border border-5 border-success";
+            limitCircle.className = "position-absolute bg-white text-dark border border-danger border-4 rounded-circle d-flex align-items-center justify-content-center";
+            
+            mask.classList.add('d-none');
+            toggleSoundAlert(false);
+        }
+    }
+
+    // 3. 利用 AJAX 呼叫後端 API 取得速限與預告資訊
+    function querySpeedLimitAPI(lat, lng) {
+        // A. 查詢當前速限
+        fetch('/api/speed-limit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ destination, avoid_conditions })
+            body: JSON.stringify({ latitude: lat, longitude: lng })
         })
-        .then(res => {
-            if (!res.ok) throw new Error('計算失敗');
-            return res.json();
-        })
+        .then(response => response.json())
         .then(data => {
-            btnCalculate.disabled = false;
-            btnCalculate.innerHTML = '<i class="fa-solid fa-compass me-2"></i> 計算個人化路線';
-
             if (data.status === 'success') {
-                targetDestination = data.destination;
-                appliedAvoidConditions = data.avoid_conditions;
-                rawRouteDataJson = data.route_data;
-
-                const parsedRoute = JSON.parse(data.route_data);
-                routeCoords = parsedRoute.coordinates;
-                routeDesc = parsedRoute.description;
-
-                // 移除舊有地圖繪製線條與標註
-                if (currentRouteLine) map.removeLayer(currentRouteLine);
-                if (startMarker) map.removeLayer(startMarker);
-                if (endMarker) map.removeLayer(endMarker);
-
-                // Leaflet 繪製路徑
-                const latlngs = routeCoords.map(coord => [coord[1], coord[0]]);
-                currentRouteLine = L.polyline(latlngs, {
-                    color: '#00ff66',
-                    weight: 6,
-                    opacity: 0.9,
-                    dashArray: '10, 5'
-                }).addTo(map);
-
-                // 聚焦地圖邊界
-                map.fitBounds(currentRouteLine.getBounds(), { padding: [50, 50] });
-
-                // 建立 Marker
-                startMarker = L.marker(latlngs[0]).addTo(map).bindPopup("起點: 台北車站").openPopup();
-                endMarker = L.marker(latlngs[latlngs.length - 1]).addTo(map).bindPopup(`目的地: ${targetDestination}`);
-
-                // 解鎖導航按鈕並隱藏歷史表單
-                document.getElementById('btnStartNav').classList.remove('d-none');
-                document.getElementById('saveHistoryForm').classList.add('d-none');
-
-                // 語音播報提醒
-                speak(`路線規劃完成。${routeDesc}，請點擊開始導航。`);
+                currentLimit = data.speed_limit;
+                document.getElementById('current-road-name').textContent = data.road_name;
+                document.getElementById('speed-limit-circle').textContent = data.speed_limit;
+                checkSpeedAndAlerts();
             }
         })
-        .catch(err => {
-            btnCalculate.disabled = false;
-            btnCalculate.innerHTML = '<i class="fa-solid fa-compass me-2"></i> 計算個人化路線';
-            alert('規劃路線失敗，請重新嘗試。');
-        });
-    });
+        .catch(err => console.error("速限查詢 API 失敗: ", err));
 
-    // 開始導航
-    const btnStartNav = document.getElementById('btnStartNav');
-    btnStartNav.addEventListener('click', function() {
-        speak(`語音導航已啟動。前方目的地為：${targetDestination}。為您避開${appliedAvoidConditions || '無'}。請專注騎乘。`);
+        // B. 查詢前方速限預告
+        fetch('/api/route/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ latitude: lat, longitude: lng })
+        })
+        .then(response => response.json())
+        .then(data => {
+            const previewPanel = document.getElementById('preview-panel');
+            if (data.status === 'success' && data.trigger_preview) {
+                document.getElementById('preview-distance').textContent = Math.round(data.distance_to_change);
+                document.getElementById('preview-speed').textContent = data.upcoming_limit;
+                previewPanel.classList.remove('d-none');
+            } else {
+                previewPanel.classList.add('d-none');
+            }
+        })
+        .catch(err => console.error("預告查詢 API 失敗: ", err));
+    }
+
+    // 依行車進度比例 (0 - 100) 插值計算當前經緯度
+    function updateRiderPosition(progressPct) {
+        const roadType = document.getElementById('sim-road-select').value;
+        const roadData = roadCoords[roadType];
         
-        btnStartNav.disabled = true;
-        btnStartNav.innerHTML = '<i class="fa-solid fa-location-arrow fa-spin me-2"></i> 導航中...';
+        const ratio = progressPct / 100.0;
+        const lat = roadData.start[0] + (roadData.end[0] - roadData.start[0]) * ratio;
+        const lng = roadData.start[1] + (roadData.end[1] - roadData.start[1]) * ratio;
 
-        // 模擬行車 5 秒後抵達
-        setTimeout(() => {
-            speak(`您已抵達目的地：${targetDestination}。行程結束。`);
-            btnStartNav.disabled = false;
-            btnStartNav.classList.add('d-none');
-            btnStartNav.innerHTML = '<i class="fa-solid fa-play me-2"></i> 開始導航 (語音提示)';
+        // 更新在地圖上的位置與彈窗
+        const newLatLng = new L.LatLng(lat, lng);
+        riderMarker.setLatLng(newLatLng);
+        
+        // 如果是模擬行車，讓地圖中心跟著移動
+        map.panTo(newLatLng);
 
-            // 填寫儲存歷史紀錄表單並解鎖
-            document.getElementById('saveDestination').value = targetDestination;
-            document.getElementById('saveAvoidConditions').value = appliedAvoidConditions;
-            document.getElementById('saveRouteData').value = rawRouteDataJson;
+        document.getElementById('current-coords').textContent = `座標: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
-            document.getElementById('saveHistoryForm').classList.remove('d-none');
-        }, 5000);
+        if (isNavigating) {
+            // 向後端 API 發送座標查詢
+            querySpeedLimitAPI(lat, lng);
+        }
+    }
+
+    // GPS 成功定位回傳
+    function onGpsSuccess(position) {
+        if (!isNavigating) return;
+
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const timestamp = position.timestamp;
+
+        // 1. 更新地圖 Marker
+        const newLatLng = new L.LatLng(lat, lng);
+        riderMarker.setLatLng(newLatLng);
+        map.panTo(newLatLng);
+
+        document.getElementById('current-coords').textContent = `座標: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+        document.getElementById('gps-status').className = "badge bg-success mb-1";
+        document.getElementById('gps-status').innerHTML = '<i class="fa-solid fa-satellite-dish me-1"></i>GPS 訊號良好';
+
+        // 2. 獲取車速 (優先使用 GPS speed, 否則使用座標差進行估算)
+        let speedKmh = 0;
+        if (position.coords.speed !== null && position.coords.speed !== undefined && position.coords.speed >= 0) {
+            speedKmh = Math.round(position.coords.speed * 3.6);
+        } else {
+            if (lastGpsCoords && lastGpsTime && timestamp > lastGpsTime) {
+                const distM = distanceInMeters(lastGpsCoords.lat, lastGpsCoords.lng, lat, lng);
+                const durationS = (timestamp - lastGpsTime) / 1000.0;
+                if (durationS > 0) {
+                    const calculatedKmh = (distM / durationS) * 3.6;
+                    if (calculatedKmh < 180.0) { // 濾除飄移雜訊
+                        speedKmh = Math.round(calculatedKmh);
+                    }
+                }
+            }
+        }
+
+        // 保存目前定位狀態供下一次計算
+        lastGpsCoords = { lat, lng };
+        lastGpsTime = timestamp;
+
+        // 更新時速與檢查速限警示
+        currentSpeed = speedKmh;
+        checkSpeedAndAlerts();
+
+        // 查詢速限與預先警告
+        querySpeedLimitAPI(lat, lng);
+    }
+
+    // GPS 定位失敗處理
+    function onGpsError(error) {
+        console.error("GPS 定位失敗: ", error);
+        let errorMsg = "定位錯誤";
+        switch (error.code) {
+            case error.PERMISSION_DENIED:
+                errorMsg = "權限不足，請在瀏覽器中允許定位";
+                break;
+            case error.POSITION_UNAVAILABLE:
+                errorMsg = "GPS 訊號弱或無法獲取位置";
+                break;
+            case error.TIMEOUT:
+                errorMsg = "GPS 定位超時";
+                break;
+        }
+        document.getElementById('gps-status').className = "badge bg-warning text-dark mb-1";
+        document.getElementById('gps-status').innerHTML = `<i class="fa-solid fa-circle-exclamation me-1"></i>${errorMsg}`;
+    }
+
+    // 綁定 UI 操作事件
+    document.addEventListener("DOMContentLoaded", function() {
+        initMap();
+
+        const startNavBtn = document.getElementById('start-nav-btn');
+        const simRoadSelect = document.getElementById('sim-road-select');
+        const simProgressSlider = document.getElementById('sim-progress-slider');
+        const simProgressVal = document.getElementById('sim-progress-val');
+        const simSpeedSlider = document.getElementById('sim-speed-slider');
+        const simSpeedVal = document.getElementById('sim-speed-val');
+        const contrastToggleBtn = document.getElementById('contrast-toggle-btn');
+
+        // 模式切換控制
+        const modeSim = document.getElementById('mode-sim');
+        const modeGps = document.getElementById('mode-gps');
+        const simControls = document.getElementById('sim-controls');
+        const gpsInstructions = document.getElementById('gps-instructions');
+        const controlsHelpText = document.getElementById('controls-help-text');
+
+        function updateModeUI() {
+            if (isNavigating) {
+                startNavBtn.click(); // 如果正在導航，先關閉
+            }
+            if (modeGps.checked) {
+                simControls.classList.add('d-none');
+                gpsInstructions.classList.remove('d-none');
+                controlsHelpText.innerHTML = '<i class="fa-solid fa-circle-info me-1"></i> 請點擊上方**「開始導航」**啟動真實 GPS 定位與超速監測。';
+            } else {
+                simControls.classList.remove('d-none');
+                gpsInstructions.classList.add('d-none');
+                controlsHelpText.innerHTML = '<i class="fa-solid fa-circle-question me-1"></i> 請先點擊上方**「開始導航」**解鎖瀏覽器音效功能，即可拖動滑桿模擬騎士行駛位置與車速。';
+            }
+        }
+
+        modeSim.addEventListener('change', updateModeUI);
+        modeGps.addEventListener('change', updateModeUI);
+
+        // A. 「開始導航」點擊事件
+        startNavBtn.addEventListener('click', function() {
+            const isGpsMode = modeGps.checked;
+
+            if (!isNavigating) {
+                isNavigating = true;
+                this.innerHTML = '<i class="fa-solid fa-stop me-2"></i>停止導航';
+                this.classList.replace('btn-premium', 'btn-danger');
+                
+                // 首次解鎖 Web Audio 音訊上下文
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                if (isGpsMode) {
+                    document.getElementById('gps-status').className = "badge bg-warning text-dark mb-1";
+                    document.getElementById('gps-status').innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>定位中...';
+                    
+                    lastGpsCoords = null;
+                    lastGpsTime = null;
+                    
+                    gpsWatchId = navigator.geolocation.watchPosition(onGpsSuccess, onGpsError, {
+                        enableHighAccuracy: true,
+                        maximumAge: 1000,
+                        timeout: 10000
+                    });
+                } else {
+                    document.getElementById('gps-status').className = "badge bg-success mb-1";
+                    document.getElementById('gps-status').innerHTML = '<i class="fa-solid fa-satellite-dish me-1"></i>模擬定位中';
+                    
+                    // 啟用模擬器控制
+                    simProgressSlider.disabled = false;
+                    simSpeedSlider.disabled = false;
+                    
+                    // 觸發一次座標更新與查詢
+                    updateRiderPosition(parseInt(simProgressSlider.value));
+                }
+            } else {
+                isNavigating = false;
+                this.innerHTML = '<i class="fa-solid fa-play me-2"></i>開始導航 (解鎖音效)';
+                this.classList.replace('btn-danger', 'btn-premium');
+                document.getElementById('gps-status').className = "badge bg-secondary mb-1";
+                document.getElementById('gps-status').innerHTML = '<i class="fa-solid fa-location-crosshairs me-1"></i>定位準備就緒';
+                
+                if (gpsWatchId !== null) {
+                    navigator.geolocation.clearWatch(gpsWatchId);
+                    gpsWatchId = null;
+                }
+
+                // 停用模擬器控制
+                simProgressSlider.disabled = true;
+                simSpeedSlider.disabled = true;
+                
+                document.getElementById('current-road-name').textContent = "點擊「開始導航」";
+                document.getElementById('speed-limit-circle').textContent = "--";
+                document.getElementById('current-speed').textContent = "0";
+                document.getElementById('preview-panel').classList.add('d-none');
+                
+                // 重設警示狀態
+                currentSpeed = 0;
+                currentLimit = null;
+                checkSpeedAndAlerts();
+            }
+        });
+
+        // B. 切換模擬路段
+        simRoadSelect.addEventListener('change', function() {
+            drawRoadLine(this.value);
+            simProgressSlider.value = 0;
+            simProgressVal.textContent = "0%";
+            updateRiderPosition(0);
+        });
+
+        // C. 模擬行駛進度滑桿滑動
+        simProgressSlider.addEventListener('input', function() {
+            simProgressVal.textContent = this.value + "%";
+            updateRiderPosition(parseInt(this.value));
+        });
+
+        // D. 模擬時速滑桿滑動
+        simSpeedSlider.addEventListener('input', function() {
+            currentSpeed = parseInt(this.value);
+            simSpeedVal.textContent = currentSpeed + " km/h";
+            checkSpeedAndAlerts();
+        });
+
+        // E. 切換高對比模式 (透過 JS add/remove class 切換 CSS)
+        contrastToggleBtn.addEventListener('click', function() {
+            document.body.classList.toggle('high-contrast');
+            if (document.body.classList.contains('high-contrast')) {
+                this.innerHTML = '<i class="fa-solid fa-circle-half-stroke me-2"></i>正常顯示模式';
+                this.className = "btn btn-yellow w-100 mt-2";
+            } else {
+                this.innerHTML = '<i class="fa-solid fa-circle-half-stroke me-2"></i>高對比模式';
+                this.className = "btn btn-outline-warning w-100 mt-2";
+            }
+        });
     });
 </script>
 {% endblock %}
